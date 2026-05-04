@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <meta name="theme-color" content="#2C1206"/>
+  <title>Dulce Gestión 🍰</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+
+  <!-- React -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    :root {
+      --chocolate:  #2C1206;
+      --cacao:      #5C2E14;
+      --caramelo:   #A0622A;
+      --dorado:     #C9963C;
+      --crema:      #FBF5E6;
+      --beige:      #EDD9B0;
+      --beige2:     #E0C49A;
+      --superficie: #FFFCF4;
+      --texto:      #1E0E04;
+      --texto2:     #6B4530;
+      --verde:      #27AE60;
+      --rojo:       #C0392B;
+      --naranja:    #E67E22;
+      --gris:       #7F8C8D;
+      --sombra:     0 3px 14px rgba(44,18,6,0.10);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--crema);
+      color: var(--texto);
+      min-height: 100vh;
+    }
+    input, select, textarea, button {
+      font-family: 'DM Sans', sans-serif;
+    }
+    /* scrollbar sutil */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--beige2); border-radius: 4px; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// ══════════════════════════════════════════════════════
+// ⚠️  REEMPLAZÁ ESTOS VALORES CON TU PROYECTO FIREBASE
+// ══════════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey:            "AIzaSyD1CqN9t984CCgZsnxTYiv-DIexEVHj2t4",
+  authDomain:        "app-reposteria-7e31e.firebaseapp.com",
+  projectId:         "app-reposteria-7e31e",
+  storageBucket:     "app-reposteria-7e31e.firebasestorage.app",
+  messagingSenderId: "767790519277",
+  appId:             "1:767790519277:web:76e0e8194e5f10d0998de4"
+};
+
+if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const db   = firebase.firestore();
+const auth = firebase.auth();
+
+// ══════════════════════════════════════════════════════
+// HELPERS
+// ══════════════════════════════════════════════════════
+const hoy = () => new Date().toISOString().split('T')[0];
+
+const formatFecha = (f) => {
+  if (!f) return '—';
+  const [y, m, d] = f.split('-');
+  return `${d}/${m}/${y}`;
+};
+
+const formatPeso = (n) =>
+  '$' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 0 });
+
+const ESTADOS = {
+  pendiente: { label: 'Pendiente',  color: '#E67E22', bg: '#FEF3E2' },
+  listo:     { label: 'Listo ✓',   color: '#27AE60', bg: '#E9F7EF' },
+  entregado: { label: 'Entregado', color: '#7F8C8D', bg: '#F2F3F4' },
+  cancelado: { label: 'Cancelado', color: '#C0392B', bg: '#FDEDEC' },
+};
+
+// ══════════════════════════════════════════════════════
+// ESTILOS COMPARTIDOS
+// ══════════════════════════════════════════════════════
+const S = {
+  input: {
+    display: 'block', width: '100%', marginTop: 5,
+    padding: '11px 13px', borderRadius: 10,
+    border: '2px solid var(--beige)',
+    background: 'var(--superficie)', color: 'var(--texto)',
+    fontSize: 15, outline: 'none', marginBottom: 2,
+  },
+  label: {
+    fontSize: 12, color: 'var(--texto2)', fontWeight: 600,
+    display: 'block', marginBottom: 3, marginTop: 12, textTransform: 'uppercase', letterSpacing: '0.5px',
+  },
+  btnPrimario: {
+    background: 'var(--caramelo)', color: 'white',
+    border: 'none', borderRadius: 10, padding: '10px 18px',
+    fontWeight: 600, fontSize: 14, cursor: 'pointer',
+  },
+  btnSecundario: {
+    background: 'var(--beige)', color: 'var(--cacao)',
+    border: 'none', borderRadius: 10, padding: '10px 18px',
+    fontWeight: 600, fontSize: 14, cursor: 'pointer',
+  },
+};
+
+// ══════════════════════════════════════════════════════
+// COMPONENTE: CAMPO DE TEXTO
+// ══════════════════════════════════════════════════════
+function Campo({ label, value, onChange, placeholder, tipo = 'text', rows }) {
+  return (
+    <>
+      <label style={S.label}>{label}</label>
+      {rows
+        ? <textarea value={value} onChange={e => onChange(e.target.value)}
+            placeholder={placeholder} rows={rows}
+            style={{ ...S.input, resize: 'vertical' }} />
+        : <input type={tipo} value={value} onChange={e => onChange(e.target.value)}
+            placeholder={placeholder} style={S.input} />
+      }
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// COMPONENTE: HEADER
+// ══════════════════════════════════════════════════════
+function Header({ titulo, onBack, onAdd, onLogout, subtitulo }) {
+  return (
+    <header style={{
+      background: 'var(--chocolate)', color: 'var(--crema)',
+      padding: '14px 16px 12px',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      position: 'sticky', top: 0, zIndex: 50,
+      boxShadow: '0 2px 12px rgba(44,18,6,0.3)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {onBack && (
+          <button onClick={onBack}
+            style={{ background: 'none', border: 'none', color: 'var(--crema)', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>
+            ←
+          </button>
+        )}
+        <div>
+          <h2 style={{ fontFamily: 'Playfair Display', fontSize: 20, lineHeight: 1.1 }}>{titulo}</h2>
+          {subtitulo && <p style={{ fontSize: 11, opacity: 0.6, marginTop: 1 }}>{subtitulo}</p>}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        {onAdd && (
+          <button onClick={onAdd}
+            style={{ ...S.btnPrimario, padding: '8px 14px', fontSize: 22, lineHeight: 1, borderRadius: 10 }}>
+            +
+          </button>
+        )}
+        {onLogout && (
+          <button onClick={onLogout}
+            style={{ background: 'none', border: '1px solid rgba(253,245,230,0.25)', color: 'var(--crema)', borderRadius: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer' }}>
+            Salir
+          </button>
+        )}
+      </div>
+    </header>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// COMPONENTE: NAV BAR (barra inferior)
+// ══════════════════════════════════════════════════════
+const TABS = [
+  { id: 'pedidos',      icon: '📋', label: 'Pedidos'    },
+  { id: 'calendario',   icon: '📅', label: 'Agenda'     },
+  { id: 'stock',        icon: '📦', label: 'Stock'      },
+  { id: 'historial',   icon: '🧾', label: 'Historial'  },
+  { id: 'presupuestos', icon: '💰', label: 'Precios'    },
+];
+
+function NavBar({ activo, onChange }) {
+  return (
+    <nav style={{
+      position: 'fixed', bottom: 0, left: 0, right: 0,
+      background: 'var(--chocolate)',
+      display: 'flex', justifyContent: 'space-around',
+      padding: '8px 0 12px',
+      zIndex: 100,
+      boxShadow: '0 -2px 16px rgba(44,18,6,0.25)',
+    }}>
+      {TABS.map(t => (
+        <button key={t.id} onClick={() => onChange(t.id)}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+            padding: '4px 10px', borderRadius: 10,
+            opacity: activo === t.id ? 1 : 0.45,
+            transform: activo === t.id ? 'scale(1.12)' : 'scale(1)',
+            transition: 'all 0.18s',
+          }}>
+          <span style={{ fontSize: 20 }}>{t.icon}</span>
+          <span style={{
+            fontSize: 10, color: 'var(--crema)',
+            fontWeight: activo === t.id ? 700 : 400,
+          }}>{t.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// PANTALLA: LOGIN
+// ══════════════════════════════════════════════════════
+function Login() {
+  const [email, setEmail]     = useState('');
+  const [pass, setPass]       = useState('');
+  const [error, setError]     = useState('');
+  const [cargando, setCarga]  = useState(false);
+
+  const ingresar = async () => {
+    if (!email || !pass) return setError('Completá los dos campos');
+    setCarga(true); setError('');
+    try {
+      await auth.signInWithEmailAndPassword(email, pass);
+    } catch {
+      setError('Email o contraseña incorrectos');
+      setCarga(false);
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      padding: '32px 24px', background: 'var(--crema)',
+    }}>
+      {/* Decoración fondo */}
+      <div style={{ position: 'fixed', top: -60, right: -60, width: 200, height: 200, borderRadius: '50%', background: 'rgba(169,98,42,0.08)', pointerEvents: 'none' }}/>
+      <div style={{ position: 'fixed', bottom: -40, left: -40, width: 160, height: 160, borderRadius: '50%', background: 'rgba(201,150,60,0.10)', pointerEvents: 'none' }}/>
+
+      <div style={{ fontSize: 64, marginBottom: 8 }}>🍰</div>
+      <h1 style={{ fontFamily: 'Playfair Display', fontSize: 34, color: 'var(--chocolate)', marginBottom: 4 }}>
+        Dulce Gestión
+      </h1>
+      <p style={{ color: 'var(--texto2)', marginBottom: 36, fontSize: 14 }}>Tu cocina, siempre organizada</p>
+
+      <div style={{ width: '100%', maxWidth: 340, background: 'var(--superficie)', borderRadius: 16, padding: 24, boxShadow: '0 4px 24px rgba(44,18,6,0.12)' }}>
+        {error && (
+          <div style={{ background: '#FDEDEC', color: 'var(--rojo)', padding: '10px 14px', borderRadius: 10, marginBottom: 14, fontSize: 13, fontWeight: 600 }}>
+            ⚠️ {error}
+          </div>
+        )}
+        <Campo label="Email" value={email} onChange={setEmail} placeholder="tu@email.com" tipo="email" />
+        <Campo label="Contraseña" value={pass} onChange={setPass} placeholder="••••••••" tipo="password" />
+        <button onClick={ingresar} disabled={cargando}
+          style={{ ...S.btnPrimario, width: '100%', marginTop: 18, padding: '14px', fontSize: 16, opacity: cargando ? 0.7 : 1 }}>
+          {cargando ? 'Ingresando...' : '🍫 Ingresar'}
+        </button>
+      </div>
+
+      <p style={{ marginTop: 20, fontSize: 12, color: 'var(--texto2)', textAlign: 'center' }}>
+        Creá tu cuenta en Firebase Authentication<br/>y luego ingresá con tu email y contraseña
+      </p>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// PANTALLA: PEDIDOS — lista
+// ══════════════════════════════════════════════════════
+function PantallaPedidos({ uid }) {
+  const [pedidos, setPedidos] = useState([]);
+  const [form, setForm]       = useState(null);
+  const [cargando, setCarga]  = useState(true);
+  const [filtro, setFiltro]   = useState('activos');
+
+  const col = db.collection(`reposteria/${uid}/pedidos`);
+
+  useEffect(() => {
+    const unsub = col.orderBy('fechaEntrega', 'asc').onSnapshot(snap => {
+      setPedidos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setCarga(false);
+    });
+    return unsub;
+  }, []);
+
+  const guardar = async (datos) => {
+    const { id, ...resto } = datos;
+    if (id) await col.doc(id).update({ ...resto, updatedAt: new Date() });
+    else    await col.add({ ...resto, createdAt: new Date(), updatedAt: new Date() });
+    setForm(null);
+  };
+
+  const cambiarEstado = async (id, estado) => {
+    await col.doc(id).update({ estado, updatedAt: new Date() });
+  };
+
+  const eliminar = async (id) => {
+    if (!confirm('¿Eliminar este pedido? Esta acción no se puede deshacer.')) return;
+    await col.doc(id).delete();
+  };
+
+  if (form !== null) {
+    return <FormularioPedido inicial={form} onGuardar={guardar} onCancelar={() => setForm(null)} />;
+  }
+
+  const activos  = pedidos.filter(p => p.estado !== 'entregado' && p.estado !== 'cancelado');
+  const mostrar  = filtro === 'activos' ? activos : pedidos;
+
+  return (
+    <div>
+      <Header titulo="📋 Pedidos" onAdd={() => setForm({})} onLogout={() => auth.signOut()} subtitulo="Dulce Gestión 🍰" />
+
+      {/* Filtros */}
+      <div style={{ padding: '12px 16px 4px', display: 'flex', gap: 8 }}>
+        {[
+          { k: 'activos', lbl: `Activos (${activos.length})` },
+          { k: 'todos',   lbl: `Todos (${pedidos.length})` },
+        ].map(f => (
+          <button key={f.k} onClick={() => setFiltro(f.k)}
+            style={{
+              padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
+              background: filtro === f.k ? 'var(--caramelo)' : 'var(--beige)',
+              color: filtro === f.k ? 'white' : 'var(--cacao)',
+              fontWeight: 600, fontSize: 13,
+            }}>
+            {f.lbl}
+          </button>
+        ))}
+      </div>
+
+      {cargando && <p style={{ textAlign: 'center', padding: 40, color: 'var(--texto2)' }}>Cargando...</p>}
+
+      {!cargando && mostrar.length === 0 && (
+        <div style={{ textAlign: 'center', padding: 56 }}>
+          <div style={{ fontSize: 52 }}>🎂</div>
+          <p style={{ color: 'var(--texto2)', marginTop: 10, marginBottom: 20 }}>
+            {filtro === 'activos' ? 'No hay pedidos activos' : 'No hay pedidos todavía'}
+          </p>
+          <button onClick={() => setForm({})} style={S.btnPrimario}>+ Nuevo pedido</button>
+        </div>
+      )}
+
+      <div style={{ padding: '8px 16px 110px' }}>
+        {mostrar.map(p => (
+          <TarjetaPedido key={p.id} pedido={p}
+            onEditar={() => setForm(p)}
+            onEstado={cambiarEstado}
+            onEliminar={eliminar} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// COMPONENTE: TARJETA PEDIDO
+// ══════════════════════════════════════════════════════
+function TarjetaPedido({ pedido, onEditar, onEstado, onEliminar }) {
+  const [abierto, setAbierto] = useState(false);
+  const est    = ESTADOS[pedido.estado] || ESTADOS.pendiente;
+  const saldo  = (pedido.precio || 0) - (pedido.sena || 0);
+
+  const diasRestantes = () => {
+    if (!pedido.fechaEntrega) return null;
+    const hoyMs = new Date().setHours(0, 0, 0, 0);
+    const entMs = new Date(pedido.fechaEntrega + 'T12:00:00').setHours(0, 0, 0, 0);
+    return Math.round((entMs - hoyMs) / 86400000);
+  };
+  const dias = diasRestantes();
+  const urgente = dias !== null && dias <= 2 && pedido.estado === 'pendiente';
+
+  return (
+    <div style={{
+      background: 'var(--superficie)',
+      borderRadius: 14, marginBottom: 12,
+      boxShadow: urgente ? '0 4px 16px rgba(230,126,34,0.2)' : 'var(--sombra)',
+      border: urgente ? '1px solid #F39C12' : '1px solid var(--beige)',
+      overflow: 'hidden',
+    }}>
+      {/* Cabecera tarjeta */}
+      <div onClick={() => setAbierto(!abierto)} style={{ padding: '14px 16px', cursor: 'pointer' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, marginRight: 10 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--chocolate)' }}>
+              {pedido.clienteNombre || 'Sin nombre'}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--texto2)', marginTop: 2 }}>
+              {pedido.producto || '—'}
+            </div>
+          </div>
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            <span style={{
+              background: est.bg, color: est.color,
+              fontSize: 11, fontWeight: 700, padding: '3px 9px',
+              borderRadius: 20, whiteSpace: 'nowrap',
+            }}>{est.label}</span>
+            {dias !== null && (
+              <div style={{
+                fontSize: 11, fontWeight: 700, marginTop: 4,
+                color: dias < 0 ? 'var(--rojo)' : dias === 0 ? 'var(--naranja)' : 'var(--texto2)',
+              }}>
+                {dias < 0 ? `⚠️ ${Math.abs(dias)}d vencido` : dias === 0 ? '🌟 ¡Hoy!' : `en ${dias}d`}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+          <span style={{ fontSize: 13, color: 'var(--texto2)' }}>
+            📅 {formatFecha(pedido.fechaEntrega)}
+          </span>
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--caramelo)' }}>
+            {formatPeso(pedido.precio)}
+          </span>
+        </div>
+      </div>
+
+      {/* Detalle expandido */}
+      {abierto && (
+        <div style={{ padding: '0 16px 14px', borderTop: '1px solid var(--beige)' }}>
+          {pedido.descripcion && (
+            <p style={{ fontSize: 13, color: 'var(--texto2)', margin: '10px 0 6px', fontStyle: 'italic' }}>
+              "{pedido.descripcion}"
+            </p>
+          )}
+
+          <div style={{ display: 'flex', gap: 20, marginTop: 10 }}>
+            <div style={{ fontSize: 13 }}>
+              <span style={{ color: 'var(--texto2)' }}>Seña: </span>
+              <b>{formatPeso(pedido.sena)}</b>
+            </div>
+            <div style={{ fontSize: 13 }}>
+              <span style={{ color: 'var(--texto2)' }}>Saldo: </span>
+              <b style={{ color: saldo > 0 ? 'var(--caramelo)' : 'var(--verde)' }}>
+                {formatPeso(saldo)}
+              </b>
+            </div>
+          </div>
+
+          {pedido.telefono && (
+            <div style={{ fontSize: 13, marginTop: 8 }}>
+              📱 <a href={`tel:${pedido.telefono}`} style={{ color: 'var(--caramelo)' }}>{pedido.telefono}</a>
+            </div>
+          )}
+
+          {/* Botones de acción */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+            <button onClick={onEditar}
+              style={{ ...S.btnSecundario, fontSize: 13, padding: '7px 12px' }}>
+              ✏️ Editar
+            </button>
+            {pedido.estado === 'pendiente' && (
+              <button onClick={() => onEstado(pedido.id, 'listo')}
+                style={{ ...S.btnPrimario, fontSize: 13, padding: '7px 12px', background: 'var(--verde)' }}>
+                ✓ Listo
+              </button>
+            )}
+            {pedido.estado === 'listo' && (
+              <button onClick={() => onEstado(pedido.id, 'entregado')}
+                style={{ ...S.btnPrimario, fontSize: 13, padding: '7px 12px', background: 'var(--gris)' }}>
+                📦 Entregado
+              </button>
+            )}
+            {pedido.estado === 'listo' && (
+              <button onClick={() => onEstado(pedido.id, 'pendiente')}
+                style={{ ...S.btnSecundario, fontSize: 13, padding: '7px 12px' }}>
+                ↩ Pendiente
+              </button>
+            )}
+            {pedido.estado !== 'cancelado' && pedido.estado !== 'entregado' && (
+              <button onClick={() => onEstado(pedido.id, 'cancelado')}
+                style={{ ...S.btnPrimario, fontSize: 13, padding: '7px 12px', background: 'var(--rojo)' }}>
+                ✕ Cancelar
+              </button>
+            )}
+            <button onClick={() => onEliminar(pedido.id)}
+              style={{ ...S.btnSecundario, fontSize: 13, padding: '7px 12px', marginLeft: 'auto', color: 'var(--rojo)' }}>
+              🗑️
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// FORMULARIO PEDIDO (nuevo / editar)
+// ══════════════════════════════════════════════════════
+function FormularioPedido({ inicial, onGuardar, onCancelar }) {
+  const [d, setD] = useState({
+    clienteNombre: '', telefono: '', producto: '',
+    descripcion: '', fechaEntrega: '', precio: '',
+    sena: '', estado: 'pendiente',
+    ...inicial,
+  });
+  const set = (k, v) => setD(prev => ({ ...prev, [k]: v }));
+
+  const guardar = () => {
+    if (!d.clienteNombre.trim()) return alert('El nombre del cliente es obligatorio');
+    if (!d.producto.trim())      return alert('El producto es obligatorio');
+    onGuardar({ ...d, precio: Number(d.precio) || 0, sena: Number(d.sena) || 0 });
+  };
+
+  return (
+    <div>
+      <Header titulo={d.id ? '✏️ Editar Pedido' : '+ Nuevo Pedido'} onBack={onCancelar} />
+      <div style={{ padding: '16px 16px 110px' }}>
+
+        <Campo label="Cliente *" value={d.clienteNombre} onChange={v => set('clienteNombre', v)} placeholder="Nombre completo" />
+        <Campo label="Teléfono" value={d.telefono} onChange={v => set('telefono', v)} placeholder="Ej: 381 123 4567" tipo="tel" />
+        <Campo label="Producto *" value={d.producto} onChange={v => set('producto', v)} placeholder="Ej: Torta de cumpleaños 3 pisos" />
+        <Campo label="Descripción / Detalles" value={d.descripcion} onChange={v => set('descripcion', v)}
+          placeholder="Sabor, relleno, decoración, observaciones..." rows={3} />
+        <Campo label="Fecha de entrega" value={d.fechaEntrega} onChange={v => set('fechaEntrega', v)} tipo="date" />
+        <Campo label="Precio total ($)" value={d.precio} onChange={v => set('precio', v)} placeholder="0" tipo="number" />
+        <Campo label="Seña / Adelanto ($)" value={d.sena} onChange={v => set('sena', v)} placeholder="0" tipo="number" />
+
+        {/* Saldo calculado */}
+        {(Number(d.precio) > 0) && (
+          <div style={{ background: 'var(--beige)', borderRadius: 10, padding: '10px 14px', marginTop: 4, fontSize: 13 }}>
+            <span style={{ color: 'var(--texto2)' }}>Saldo restante: </span>
+            <b style={{ color: 'var(--caramelo)' }}>
+              {formatPeso(Number(d.precio) - Number(d.sena))}
+            </b>
+          </div>
+        )}
+
+        {/* Estado */}
+        <label style={S.label}>Estado</label>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+          {Object.entries(ESTADOS).map(([k, v]) => (
+            <button key={k} onClick={() => set('estado', k)}
+              style={{
+                padding: '8px 14px', borderRadius: 20, cursor: 'pointer',
+                border: `2px solid ${d.estado === k ? v.color : 'var(--beige)'}`,
+                background: d.estado === k ? v.bg : 'transparent',
+                color: d.estado === k ? v.color : 'var(--texto2)',
+                fontWeight: 600, fontSize: 13,
+              }}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <button onClick={guardar} style={{ ...S.btnPrimario, flex: 1, padding: 14, fontSize: 15 }}>
+            {d.id ? '✓ Guardar cambios' : '+ Crear pedido'}
+          </button>
+          <button onClick={onCancelar} style={{ ...S.btnSecundario, padding: 14 }}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// PANTALLA: STOCK (ingredientes)
+// ══════════════════════════════════════════════════════
+function PantallaStock({ uid }) {
+  const [items, setItems]   = useState([]);
+  const [form, setForm]     = useState(null);
+  const [buscar, setBuscar] = useState('');
+
+  const col = db.collection(`reposteria/${uid}/stock`);
+
+  useEffect(() => {
+    return col.orderBy('nombre', 'asc').onSnapshot(snap => {
+      setItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }, []);
+
+  const guardar = async (datos) => {
+    const { id, ...resto } = datos;
+    if (id) await col.doc(id).update(resto);
+    else    await col.add(resto);
+    setForm(null);
+  };
+
+  const eliminar = async (id) => {
+    if (!confirm('¿Eliminar este ingrediente?')) return;
+    await col.doc(id).delete();
+  };
+
+  const ajustar = async (id, delta) => {
+    const item = items.find(i => i.id === id);
+    if (!item) return;
+    const nueva = Math.max(0, (Number(item.cantidad) || 0) + delta);
+    await col.doc(id).update({ cantidad: nueva });
+  };
+
+  if (form !== null) {
+    return <FormularioStock inicial={form} onGuardar={guardar} onCancelar={() => setForm(null)} />;
+  }
+
+  const bajos    = items.filter(i => Number(i.cantidad) <= Number(i.stockMinimo || 0));
+  const filtrados = items.filter(i => i.nombre.toLowerCase().includes(buscar.toLowerCase()));
+
+  return (
+    <div>
+      <Header titulo="📦 Stock" onAdd={() => setForm({})} />
+
+      {/* Alerta stock bajo */}
+      {bajos.length > 0 && (
+        <div style={{ margin: '12px 16px 0', padding: '10px 14px', background: '#FEF3E2', borderRadius: 10, border: '1px solid #F39C12' }}>
+          <b style={{ color: 'var(--naranja)', fontSize: 13 }}>⚠️ Stock bajo: </b>
+          <span style={{ fontSize: 13, color: 'var(--texto2)' }}>{bajos.map(i => i.nombre).join(', ')}</span>
+        </div>
+      )}
+
+      {/* Buscador */}
+      <div style={{ padding: '10px 16px 4px' }}>
+        <input value={buscar} onChange={e => setBuscar(e.target.value)}
+          placeholder="🔍 Buscar ingrediente..."
+          style={{ ...S.input, marginTop: 0 }} />
+      </div>
+
+      {filtrados.length === 0 && items.length === 0 && (
+        <div style={{ textAlign: 'center', padding: 56 }}>
+          <div style={{ fontSize: 52 }}>🥣</div>
+          <p style={{ color: 'var(--texto2)', marginTop: 10, marginBottom: 20 }}>No hay ingredientes cargados</p>
+          <button onClick={() => setForm({})} style={S.btnPrimario}>+ Agregar ingrediente</button>
+        </div>
+      )}
+
+      <div style={{ padding: '4px 16px 110px' }}>
+        {filtrados.map(item => {
+          const bajo = Number(item.cantidad) <= Number(item.stockMinimo || 0);
+          return (
+            <div key={item.id} style={{
+              background: 'var(--superficie)', borderRadius: 12, marginBottom: 10,
+              padding: '14px 16px', boxShadow: 'var(--sombra)',
+              border: bajo ? '1px solid #F39C12' : '1px solid var(--beige)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{item.nombre}</div>
+                  <div style={{ fontSize: 12, color: 'var(--texto2)', marginTop: 2 }}>
+                    Mínimo: {item.stockMinimo || 0} {item.unidad}
+                    {item.costoUnitario > 0 && ` · ${formatPeso(item.costoUnitario)}/${item.unidad}`}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button onClick={() => ajustar(item.id, -1)}
+                    style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: 'var(--beige)', cursor: 'pointer', fontSize: 18, fontWeight: 700, lineHeight: 1 }}>
+                    −
+                  </button>
+                  <div style={{ textAlign: 'center', minWidth: 56 }}>
+                    <div style={{ fontWeight: 700, fontSize: 20 }}>{item.cantidad || 0}</div>
+                    <div style={{ fontSize: 10, color: 'var(--texto2)' }}>{item.unidad}</div>
+                  </div>
+                  <button onClick={() => ajustar(item.id, 1)}
+                    style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: 'var(--caramelo)', color: 'white', cursor: 'pointer', fontSize: 18, fontWeight: 700, lineHeight: 1 }}>
+                    +
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button onClick={() => setForm(item)}
+                  style={{ ...S.btnSecundario, fontSize: 12, padding: '5px 12px' }}>✏️ Editar</button>
+                <button onClick={() => eliminar(item.id)}
+                  style={{ ...S.btnSecundario, fontSize: 12, padding: '5px 12px', color: 'var(--rojo)' }}>🗑️</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FormularioStock({ inicial, onGuardar, onCancelar }) {
+  const UNIDADES = ['kg', 'g', 'lt', 'ml', 'unidades', 'tazas', 'cdas', 'cditas'];
+  const [d, setD] = useState({
+    nombre: '', cantidad: 0, unidad: 'kg', stockMinimo: 0, costoUnitario: 0,
+    ...inicial,
+  });
+  const set = (k, v) => setD(prev => ({ ...prev, [k]: v }));
+
+  const guardar = () => {
+    if (!d.nombre.trim()) return alert('El nombre es obligatorio');
+    onGuardar({
+      ...d,
+      cantidad:      Number(d.cantidad) || 0,
+      stockMinimo:   Number(d.stockMinimo) || 0,
+      costoUnitario: Number(d.costoUnitario) || 0,
+    });
+  };
+
+  return (
+    <div>
+      <Header titulo={d.id ? '✏️ Editar Ingrediente' : '+ Nuevo Ingrediente'} onBack={onCancelar} />
+      <div style={{ padding: '16px 16px 110px' }}>
+        <Campo label="Nombre *" value={d.nombre} onChange={v => set('nombre', v)} placeholder="Ej: Harina 0000" />
+
+        <label style={S.label}>Unidad de medida</label>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+          {UNIDADES.map(u => (
+            <button key={u} onClick={() => set('unidad', u)}
+              style={{
+                padding: '7px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
+                background: d.unidad === u ? 'var(--caramelo)' : 'var(--beige)',
+                color: d.unidad === u ? 'white' : 'var(--cacao)',
+                fontWeight: 600, fontSize: 13,
+              }}>
+              {u}
+            </button>
+          ))}
+        </div>
+
+        <Campo label={`Cantidad actual (${d.unidad})`} value={d.cantidad} onChange={v => set('cantidad', v)} tipo="number" placeholder="0" />
+        <Campo label={`Stock mínimo (${d.unidad}) — alerta`} value={d.stockMinimo} onChange={v => set('stockMinimo', v)} tipo="number" placeholder="0" />
+        <Campo label={`Costo por ${d.unidad} ($) — para presupuestos`} value={d.costoUnitario} onChange={v => set('costoUnitario', v)} tipo="number" placeholder="0" />
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <button onClick={guardar} style={{ ...S.btnPrimario, flex: 1, padding: 14, fontSize: 15 }}>
+            {d.id ? '✓ Guardar' : '+ Agregar'}
+          </button>
+          <button onClick={onCancelar} style={{ ...S.btnSecundario, padding: 14 }}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// PANTALLA: CALENDARIO / AGENDA
+// ══════════════════════════════════════════════════════
+function PantallaCalendario({ uid }) {
+  const [pedidos, setPedidos] = useState([]);
+
+  useEffect(() => {
+    return db.collection(`reposteria/${uid}/pedidos`)
+      .where('estado', 'in', ['pendiente', 'listo'])
+      .orderBy('fechaEntrega', 'asc')
+      .onSnapshot(snap => {
+        setPedidos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+  }, []);
+
+  // Agrupar por fecha
+  const porFecha = {};
+  pedidos.forEach(p => {
+    const f = p.fechaEntrega || '__sin_fecha__';
+    if (!porFecha[f]) porFecha[f] = [];
+    porFecha[f].push(p);
+  });
+
+  const totalHoy = (porFecha[hoy()] || []).reduce((s, p) => s + (p.precio || 0), 0);
+
+  return (
+    <div>
+      <Header titulo="📅 Agenda de Entregas" />
+      <div style={{ padding: '12px 16px 110px' }}>
+
+        {Object.keys(porFecha).length === 0 && (
+          <div style={{ textAlign: 'center', padding: 56 }}>
+            <div style={{ fontSize: 52 }}>📅</div>
+            <p style={{ color: 'var(--texto2)', marginTop: 10 }}>No hay entregas programadas</p>
+          </div>
+        )}
+
+        {Object.entries(porFecha)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([fecha, ps]) => {
+            const esHoy    = fecha === hoy();
+            const esPasada = fecha < hoy() && fecha !== '__sin_fecha__';
+            return (
+              <div key={fecha} style={{ marginBottom: 20 }}>
+                {/* Cabecera de día */}
+                <div style={{
+                  padding: '8px 14px', borderRadius: 10, marginBottom: 8,
+                  background: esHoy ? 'var(--caramelo)' : esPasada ? 'var(--rojo)' : 'var(--chocolate)',
+                  color: 'var(--crema)', fontSize: 13, fontWeight: 700,
+                  display: 'flex', justifyContent: 'space-between',
+                }}>
+                  <span>
+                    {fecha === '__sin_fecha__' ? '📌 Sin fecha' : formatFecha(fecha)}
+                    {esHoy && ' — 🌟 HOY'}
+                    {esPasada && ' — ⚠️ VENCIDO'}
+                  </span>
+                  <span>{ps.length} pedido{ps.length > 1 ? 's' : ''}</span>
+                </div>
+
+                {/* Pedidos del día */}
+                {ps.map(p => {
+                  const est = ESTADOS[p.estado] || ESTADOS.pendiente;
+                  return (
+                    <div key={p.id} style={{
+                      background: 'var(--superficie)', borderRadius: 10, padding: '12px 14px',
+                      marginBottom: 8, borderLeft: `4px solid ${est.color}`,
+                      boxShadow: 'var(--sombra)',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 15 }}>{p.clienteNombre}</div>
+                          <div style={{ fontSize: 13, color: 'var(--texto2)' }}>{p.producto}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{
+                            fontSize: 11, fontWeight: 700, padding: '3px 8px',
+                            borderRadius: 20, background: est.bg, color: est.color,
+                          }}>{est.label}</span>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--caramelo)', marginTop: 4 }}>
+                            {formatPeso(p.precio)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// PANTALLA: HISTORIAL
+// ══════════════════════════════════════════════════════
+function PantallaHistorial({ uid }) {
+  const [pedidos, setPedidos] = useState([]);
+  const [mes, setMes] = useState(() => new Date().toISOString().slice(0, 7));
+
+  useEffect(() => {
+    return db.collection(`reposteria/${uid}/pedidos`)
+      .where('estado', '==', 'entregado')
+      .orderBy('fechaEntrega', 'desc')
+      .onSnapshot(snap => {
+        setPedidos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+  }, []);
+
+  const delMes  = pedidos.filter(p => (p.fechaEntrega || '').startsWith(mes));
+  const total   = delMes.reduce((s, p) => s + (p.precio || 0), 0);
+  const cobrado = delMes.reduce((s, p) => s + (p.precio || 0), 0); // mismo total si todo cobrado
+
+  return (
+    <div>
+      <Header titulo="🧾 Historial" />
+      <div style={{ padding: '12px 16px 110px' }}>
+
+        {/* Selector de mes */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <label style={{ ...S.label, margin: 0 }}>Mes:</label>
+          <input type="month" value={mes} onChange={e => setMes(e.target.value)}
+            style={{ ...S.input, margin: 0, flex: 1 }} />
+        </div>
+
+        {/* Resumen del mes */}
+        <div style={{
+          background: 'var(--chocolate)', color: 'var(--crema)',
+          borderRadius: 14, padding: 18, marginBottom: 16,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <div>
+            <div style={{ fontSize: 11, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pedidos entregados</div>
+            <div style={{ fontFamily: 'Playfair Display', fontSize: 36, fontWeight: 700, lineHeight: 1.1 }}>{delMes.length}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 11, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total facturado</div>
+            <div style={{ fontFamily: 'Playfair Display', fontSize: 28, fontWeight: 700, color: 'var(--dorado)', lineHeight: 1.1 }}>
+              {formatPeso(total)}
+            </div>
+          </div>
+        </div>
+
+        {delMes.length === 0 && (
+          <p style={{ textAlign: 'center', color: 'var(--texto2)', padding: 32 }}>
+            Sin entregas registradas en este mes
+          </p>
+        )}
+
+        {delMes.map(p => (
+          <div key={p.id} style={{
+            background: 'var(--superficie)', borderRadius: 12, padding: '14px 16px',
+            marginBottom: 10, boxShadow: 'var(--sombra)', border: '1px solid var(--beige)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{p.clienteNombre}</div>
+                <div style={{ fontSize: 13, color: 'var(--texto2)' }}>{p.producto}</div>
+                <div style={{ fontSize: 12, color: 'var(--texto2)', marginTop: 4 }}>
+                  📅 {formatFecha(p.fechaEntrega)}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontWeight: 700, color: 'var(--caramelo)', fontSize: 16 }}>
+                  {formatPeso(p.precio)}
+                </div>
+                {p.sena > 0 && (
+                  <div style={{ fontSize: 12, color: 'var(--texto2)', marginTop: 2 }}>
+                    Seña: {formatPeso(p.sena)}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// PANTALLA: PRESUPUESTOS (calculadora de costos)
+// ══════════════════════════════════════════════════════
+function PantallaPresupuestos({ uid }) {
+  const [stock, setStock]       = useState([]);
+  const [lineas, setLineas]     = useState([]);
+  const [margen, setMargen]     = useState(40);
+  const [nombre, setNombre]     = useState('');
+  const [ingId, setIngId]       = useState('');
+  const [cant, setCant]         = useState('');
+
+  useEffect(() => {
+    return db.collection(`reposteria/${uid}/stock`).orderBy('nombre', 'asc').onSnapshot(snap => {
+      setStock(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }, []);
+
+  const agregar = () => {
+    if (!ingId || !cant) return alert('Seleccioná un ingrediente y cantidad');
+    const item = stock.find(i => i.id === ingId);
+    if (!item) return;
+    setLineas(prev => [...prev, {
+      _id: Date.now(), nombre: item.nombre, unidad: item.unidad,
+      cantidad: Number(cant), costoUnitario: Number(item.costoUnitario) || 0,
+    }]);
+    setIngId(''); setCant('');
+  };
+
+  const quitar = (id) => setLineas(prev => prev.filter(l => l._id !== id));
+
+  const costoTotal   = lineas.reduce((s, l) => s + l.cantidad * l.costoUnitario, 0);
+  const precioVenta  = costoTotal * (1 + margen / 100);
+  const ganancia     = precioVenta - costoTotal;
+
+  return (
+    <div>
+      <Header titulo="💰 Presupuestos" />
+      <div style={{ padding: '12px 16px 110px' }}>
+
+        <Campo label="Nombre del producto a presupuestar" value={nombre} onChange={setNombre} placeholder="Ej: Torta 3 pisos vainilla y dulce de leche" />
+
+        {/* Agregar ingrediente */}
+        <div style={{ background: 'var(--superficie)', borderRadius: 14, padding: 14, marginTop: 12, boxShadow: 'var(--sombra)' }}>
+          <label style={S.label}>Agregar ingrediente</label>
+          <select value={ingId} onChange={e => setIngId(e.target.value)} style={{ ...S.input, marginTop: 4 }}>
+            <option value="">— Elegí un ingrediente —</option>
+            {stock.map(i => (
+              <option key={i.id} value={i.id}>
+                {i.nombre} ({i.unidad}) {i.costoUnitario > 0 ? `· ${formatPeso(i.costoUnitario)}/${i.unidad}` : ''}
+              </option>
+            ))}
+          </select>
+          <Campo label="Cantidad a usar" value={cant} onChange={setCant} tipo="number" placeholder="0" />
+          <button onClick={agregar} style={{ ...S.btnPrimario, width: '100%', marginTop: 8 }}>
+            + Agregar ingrediente
+          </button>
+        </div>
+
+        {/* Lista de ingredientes */}
+        {lineas.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <label style={S.label}>Ingredientes del presupuesto</label>
+            {lineas.map(l => (
+              <div key={l._id} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '10px 12px', background: 'var(--superficie)', borderRadius: 10,
+                marginBottom: 6, border: '1px solid var(--beige)', boxShadow: 'var(--sombra)',
+              }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{l.nombre}</div>
+                  <div style={{ fontSize: 12, color: 'var(--texto2)' }}>
+                    {l.cantidad} {l.unidad} · {formatPeso(l.cantidad * l.costoUnitario)}
+                  </div>
+                </div>
+                <button onClick={() => quitar(l._id)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--rojo)' }}>
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Resultado */}
+        <div style={{
+          background: 'var(--chocolate)', color: 'var(--crema)',
+          borderRadius: 14, padding: 18, marginTop: 16,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+            <span style={{ fontSize: 13, opacity: 0.7 }}>Costo de ingredientes</span>
+            <span style={{ fontWeight: 700 }}>{formatPeso(costoTotal)}</span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <span style={{ fontSize: 13, opacity: 0.7 }}>Margen de ganancia</span>
+            <input type="number" value={margen} onChange={e => setMargen(Number(e.target.value))}
+              style={{
+                width: 64, padding: '4px 8px', borderRadius: 8, border: 'none',
+                background: 'rgba(255,255,255,0.15)', color: 'white',
+                fontSize: 15, fontWeight: 700, textAlign: 'center',
+              }} />
+            <span style={{ fontSize: 13 }}>%</span>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+            <span style={{ fontSize: 13, opacity: 0.7 }}>Tu ganancia estimada</span>
+            <span style={{ fontWeight: 600, color: '#A8E6C0' }}>{formatPeso(ganancia)}</span>
+          </div>
+
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 12, marginTop: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontWeight: 700, fontSize: 15 }}>💰 Precio sugerido</span>
+              <span style={{ fontFamily: 'Playfair Display', fontWeight: 700, color: 'var(--dorado)', fontSize: 26 }}>
+                {formatPeso(precioVenta)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {costoTotal === 0 && (
+          <p style={{ fontSize: 12, color: 'var(--texto2)', marginTop: 10, textAlign: 'center', fontStyle: 'italic' }}>
+            💡 Tip: cargá el "costo por unidad" de cada ingrediente en Stock para que los cálculos sean exactos
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// APP PRINCIPAL
+// ══════════════════════════════════════════════════════
+function App() {
+  const [user, setUser] = useState(undefined);
+  const [tab, setTab]   = useState('pedidos');
+
+  useEffect(() => {
+    return auth.onAuthStateChanged(u => setUser(u));
+  }, []);
+
+  // Cargando estado inicial de auth
+  if (user === undefined) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
+        <div style={{ fontSize: 56 }}>🍰</div>
+        <p style={{ color: 'var(--texto2)', fontSize: 15 }}>Cargando Dulce Gestión...</p>
+      </div>
+    );
+  }
+
+  if (!user) return <Login />;
+
+  const pantallas = {
+    pedidos:      <PantallaPedidos      uid={user.uid} />,
+    calendario:   <PantallaCalendario  uid={user.uid} />,
+    stock:        <PantallaStock        uid={user.uid} />,
+    historial:    <PantallaHistorial   uid={user.uid} />,
+    presupuestos: <PantallaPresupuestos uid={user.uid} />,
+  };
+
+  return (
+    <div style={{ paddingBottom: 72 }}>
+      {pantallas[tab] || pantallas.pedidos}
+      <NavBar activo={tab} onChange={setTab} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
