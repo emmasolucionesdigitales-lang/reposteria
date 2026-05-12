@@ -37,6 +37,7 @@
       --naranja:    #E67E22;
       --gris:       #7F8C8D;
       --sombra:     0 3px 14px rgba(44,18,6,0.10);
+      --sombra2:    0 4px 20px rgba(44,18,6,0.16);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body {
@@ -50,6 +51,38 @@
     }
     /* scrollbar sutil */
     ::-webkit-scrollbar { width: 4px; }
+    /* ── utilidades globales ── */
+    .card-base {
+      background: var(--superficie);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 12px;
+      border: 1px solid var(--beige);
+      box-shadow: var(--sombra);
+    }
+    .badge {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    /* modal overlay global */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(44,18,6,0.52);
+      z-index: 200;
+      display: flex; align-items: flex-end;
+    }
+    .modal-sheet {
+      background: var(--superficie);
+      border-radius: 20px 20px 0 0;
+      padding: 24px 20px 44px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--beige2); border-radius: 4px; }
   </style>
@@ -148,14 +181,18 @@ const S = {
 // ══════════════════════════════════════════════════════
 // COMPONENTE: CAMPO DE TEXTO
 // ══════════════════════════════════════════════════════
-function Campo({ label, value, onChange, placeholder, tipo = 'text', rows }) {
+function Campo({ label, value, onChange, placeholder, tipo = 'text', rows, children }) {
   return (
     <>
-      <label style={S.label}>{label}</label>
+      {label && <label style={S.label}>{label}</label>}
       {rows
         ? <textarea value={value} onChange={e => onChange(e.target.value)}
             placeholder={placeholder} rows={rows}
             style={{ ...S.input, resize: 'vertical' }} />
+        : tipo === 'select'
+        ? <select value={value} onChange={e => onChange(e.target.value)} style={S.input}>
+            {children}
+          </select>
         : <input type={tipo} value={value} onChange={e => onChange(e.target.value)}
             placeholder={placeholder} style={S.input} />
       }
@@ -214,6 +251,7 @@ const TABS = [
   { id: 'stock',        icon: '📦', label: 'Stock'      },
   { id: 'historial',   icon: '🧾', label: 'Historial'  },
   { id: 'presupuestos', icon: '💰', label: 'Precios'    },
+  { id: 'recetas',      icon: '🍰', label: 'Recetas'    },
 ];
 
 function NavBar({ activo, onChange }) {
@@ -1306,12 +1344,605 @@ function FormularioProducto({ inicial, onGuardar, onCancelar, categorias }) {
   );
 }
 
+
+// ══════════════════════════════════════════════════════
+// DATOS DEFAULT — Recetas & Costos (localStorage)
+// ══════════════════════════════════════════════════════
+const ING_DEFAULT_RC = [
+  { id:'i01', nombre:'Harina 0000',         unidad:'kg',     precio:1500  },
+  { id:'i02', nombre:'Azúcar',              unidad:'kg',     precio:1200  },
+  { id:'i03', nombre:'Azúcar impalpable',   unidad:'kg',     precio:1500  },
+  { id:'i04', nombre:'Manteca',             unidad:'kg',     precio:5000  },
+  { id:'i05', nombre:'Huevos',              unidad:'docena', precio:2400  },
+  { id:'i06', nombre:'Leche',               unidad:'litro',  precio:900   },
+  { id:'i07', nombre:'Crema de leche',      unidad:'litro',  precio:3500  },
+  { id:'i08', nombre:'Dulce de leche',      unidad:'kg',     precio:3500  },
+  { id:'i09', nombre:'Cacao amargo',        unidad:'kg',     precio:8000  },
+  { id:'i10', nombre:'Chocolate cobertura', unidad:'kg',     precio:12000 },
+  { id:'i11', nombre:'Levadura seca',       unidad:'kg',     precio:5000  },
+  { id:'i12', nombre:'Polvo de hornear',    unidad:'kg',     precio:3500  },
+  { id:'i13', nombre:'Sal',                 unidad:'kg',     precio:500   },
+  { id:'i14', nombre:'Esencia de vainilla', unidad:'litro',  precio:10000 },
+  { id:'i15', nombre:'Maizena',             unidad:'kg',     precio:2000  },
+  { id:'i16', nombre:'Coco rallado',        unidad:'kg',     precio:4000  },
+  { id:'i17', nombre:'Aceite de girasol',   unidad:'litro',  precio:1500  },
+  { id:'i18', nombre:'Queso crema',         unidad:'kg',     precio:5500  },
+  { id:'i19', nombre:'Mermelada',           unidad:'kg',     precio:3500  },
+  { id:'i20', nombre:'Gelatina sin sabor',  unidad:'kg',     precio:15000 },
+  { id:'i21', nombre:'Almidón de maíz',     unidad:'kg',     precio:2000  },
+];
+
+const REC_DEFAULT_RC = [
+  {
+    id:'r1', emoji:'🎂', nombre:'Torta de Chocolate 1 kg',
+    descripcion:'Bizcochuelo húmedo con dulce de leche y crema chantilly',
+    rinde:'8 a 10 porciones',
+    ingredientes:[
+      { ingId:'i01', cantidad:300 },
+      { ingId:'i02', cantidad:250 },
+      { ingId:'i04', cantidad:150 },
+      { ingId:'i05', cantidad:4   },
+      { ingId:'i06', cantidad:150 },
+      { ingId:'i09', cantidad:50  },
+      { ingId:'i12', cantidad:15  },
+      { ingId:'i14', cantidad:10  },
+      { ingId:'i08', cantidad:300 },
+      { ingId:'i07', cantidad:200 },
+    ]
+  },
+  {
+    id:'r2', emoji:'🥐', nombre:'Medialunas de Manteca (12 un)',
+    descripcion:'Masa laminada clásica, hojaldrada y brillante',
+    rinde:'12 unidades',
+    ingredientes:[
+      { ingId:'i01', cantidad:500 },
+      { ingId:'i02', cantidad:60  },
+      { ingId:'i04', cantidad:200 },
+      { ingId:'i05', cantidad:2   },
+      { ingId:'i06', cantidad:180 },
+      { ingId:'i11', cantidad:10  },
+      { ingId:'i13', cantidad:5   },
+    ]
+  },
+  {
+    id:'r3', emoji:'🍩', nombre:'Bolas de Fraile (12 un)',
+    descripcion:'Fritas, esponjosas, rellenas con dulce de leche',
+    rinde:'12 unidades',
+    ingredientes:[
+      { ingId:'i01', cantidad:500 },
+      { ingId:'i02', cantidad:80  },
+      { ingId:'i04', cantidad:60  },
+      { ingId:'i05', cantidad:3   },
+      { ingId:'i06', cantidad:200 },
+      { ingId:'i11', cantidad:15  },
+      { ingId:'i13', cantidad:3   },
+      { ingId:'i17', cantidad:500 },
+      { ingId:'i08', cantidad:400 },
+      { ingId:'i03', cantidad:50  },
+    ]
+  },
+  {
+    id:'r4', emoji:'🍪', nombre:'Alfajores de Maizena (12 un)',
+    descripcion:'Tapas tiernas de maizena, rellenas con DDL y rebozadas en coco',
+    rinde:'12 unidades',
+    ingredientes:[
+      { ingId:'i15', cantidad:300 },
+      { ingId:'i01', cantidad:200 },
+      { ingId:'i03', cantidad:100 },
+      { ingId:'i04', cantidad:200 },
+      { ingId:'i05', cantidad:3   },
+      { ingId:'i12', cantidad:10  },
+      { ingId:'i14', cantidad:5   },
+      { ingId:'i08', cantidad:400 },
+      { ingId:'i16', cantidad:100 },
+    ]
+  },
+  {
+    id:'r5', emoji:'🍰', nombre:'Milhojas Grande (8 porc)',
+    descripcion:'Masa hojaldrada casera, crema chantilly y dulce de leche',
+    rinde:'8 porciones',
+    ingredientes:[
+      { ingId:'i01', cantidad:500 },
+      { ingId:'i04', cantidad:300 },
+      { ingId:'i13', cantidad:5   },
+      { ingId:'i07', cantidad:500 },
+      { ingId:'i08', cantidad:400 },
+      { ingId:'i03', cantidad:80  },
+    ]
+  },
+  {
+    id:'r6', emoji:'🥧', nombre:'Tarta Grande (8 porc)',
+    descripcion:'Masa casera con relleno de crema y queso',
+    rinde:'8 porciones',
+    ingredientes:[
+      { ingId:'i01', cantidad:300 },
+      { ingId:'i04', cantidad:150 },
+      { ingId:'i05', cantidad:3   },
+      { ingId:'i13', cantidad:5   },
+      { ingId:'i07', cantidad:250 },
+      { ingId:'i18', cantidad:300 },
+    ]
+  },
+  {
+    id:'r7', emoji:'🥧', nombre:'Tarta Chica (4 porc)',
+    descripcion:'Versión pequeña, ideal para 4 personas',
+    rinde:'4 porciones',
+    ingredientes:[
+      { ingId:'i01', cantidad:150 },
+      { ingId:'i04', cantidad:75  },
+      { ingId:'i05', cantidad:2   },
+      { ingId:'i13', cantidad:3   },
+      { ingId:'i07', cantidad:150 },
+      { ingId:'i18', cantidad:200 },
+    ]
+  },
+  {
+    id:'r8', emoji:'🍩', nombre:'Donas Glaseadas (12 un)',
+    descripcion:'Esponjosas, fritas y bañadas en glaseado de azúcar',
+    rinde:'12 unidades',
+    ingredientes:[
+      { ingId:'i01', cantidad:500 },
+      { ingId:'i02', cantidad:100 },
+      { ingId:'i04', cantidad:80  },
+      { ingId:'i05', cantidad:3   },
+      { ingId:'i06', cantidad:180 },
+      { ingId:'i11', cantidad:12  },
+      { ingId:'i13', cantidad:5   },
+      { ingId:'i14', cantidad:10  },
+      { ingId:'i17', cantidad:500 },
+      { ingId:'i03', cantidad:200 },
+    ]
+  },
+  {
+    id:'r9', emoji:'🥐', nombre:'Facturas Variadas (12 un)',
+    descripcion:'Vigilantes, cañoncitos y palmeritas con DDL y mermelada',
+    rinde:'12 unidades',
+    ingredientes:[
+      { ingId:'i01', cantidad:600 },
+      { ingId:'i02', cantidad:80  },
+      { ingId:'i04', cantidad:250 },
+      { ingId:'i05', cantidad:2   },
+      { ingId:'i06', cantidad:200 },
+      { ingId:'i11', cantidad:15  },
+      { ingId:'i13', cantidad:8   },
+      { ingId:'i08', cantidad:200 },
+      { ingId:'i19', cantidad:100 },
+      { ingId:'i03', cantidad:80  },
+    ]
+  },
+  {
+    id:'r10', emoji:'🧁', nombre:'Cupcakes (12 un)',
+    descripcion:'Esponjosos con frosting de manteca y dulce de leche',
+    rinde:'12 unidades',
+    ingredientes:[
+      { ingId:'i01', cantidad:250 },
+      { ingId:'i02', cantidad:200 },
+      { ingId:'i04', cantidad:120 },
+      { ingId:'i05', cantidad:3   },
+      { ingId:'i06', cantidad:120 },
+      { ingId:'i12', cantidad:10  },
+      { ingId:'i14', cantidad:5   },
+      { ingId:'i08', cantidad:200 },
+      { ingId:'i07', cantidad:200 },
+    ]
+  },
+];
+
+// ── helpers de costos ──────────────────────────────────
+function rcCostoItem(ing, cantidad) {
+  if (!ing || !cantidad) return 0;
+  switch (ing.unidad) {
+    case 'kg':     return (cantidad / 1000) * ing.precio;
+    case 'litro':  return (cantidad / 1000) * ing.precio;
+    case 'docena': return (cantidad / 12)   * ing.precio;
+    case 'unidad': return  cantidad          * ing.precio;
+    default:       return 0;
+  }
+}
+function rcFmtQty(ing, cantidad) {
+  if (!ing) return '—';
+  switch (ing.unidad) {
+    case 'kg':     return cantidad >= 1000 ? (cantidad/1000)+'kg' : cantidad+'g';
+    case 'litro':  return cantidad >= 1000 ? (cantidad/1000)+'L'  : cantidad+'ml';
+    default:       return cantidad+' un.';
+  }
+}
+function rcPeso(n) { return '$\u202F' + Math.round(n).toLocaleString('es-AR'); }
+const RC_UNIT_HINT = { kg:'g', litro:'ml', docena:'un', unidad:'un' };
+
+// ══════════════════════════════════════════════════════
+// PANTALLA: RECETAS & COSTOS
+// ══════════════════════════════════════════════════════
+function PantallaRecetas() {
+  const loadIng = () => { try { return JSON.parse(localStorage.getItem('dg_rc_ing')) || ING_DEFAULT_RC; } catch { return ING_DEFAULT_RC; } };
+  const loadRec = () => { try { return JSON.parse(localStorage.getItem('dg_rc_rec')) || REC_DEFAULT_RC; } catch { return REC_DEFAULT_RC; } };
+
+  const [ing, setIngState]   = useState(loadIng);
+  const [rec, setRecState]   = useState(loadRec);
+  const [subTab, setSubTab]  = useState('recetas');
+  const [modIngr, setModIngr]= useState(null);  // null | {} | {id,...}
+  const [modRec, setModRec]  = useState(null);  // null | {} | {id,...}
+  const [verRec, setVerRec]  = useState(null);
+  const [calcId, setCalcId]  = useState(null);
+  const [calcN, setCalcN]    = useState(1);
+  const [margen, setMargen]  = useState(150);
+
+  const saveIng = v => { setIngState(v); localStorage.setItem('dg_rc_ing', JSON.stringify(v)); };
+  const saveRec = v => { setRecState(v); localStorage.setItem('dg_rc_rec', JSON.stringify(v)); };
+  const getIng  = id => ing.find(i => i.id === id);
+  const uid2    = () => '_' + Math.random().toString(36).slice(2,9);
+  const costoRec= r => (r.ingredientes||[]).reduce((s,ir) => s + rcCostoItem(getIng(ir.ingId), ir.cantidad), 0);
+
+  // ── SUB-TABS BAR ──────────────────────────────────
+  const SubTab = () => {
+    const tabs2 = [
+      { id:'ingredientes', icon:'🧂', lbl:'Ingredientes' },
+      { id:'recetas',      icon:'📖', lbl:'Recetas'      },
+      { id:'calcular',     icon:'🧮', lbl:'Calcular'     },
+    ];
+    return (
+      <div style={{ display:'flex', background:'var(--beige)', borderRadius:12, margin:'10px 16px 0', padding:4, gap:4 }}>
+        {tabs2.map(t => (
+          <button key={t.id} onClick={() => setSubTab(t.id)}
+            style={{
+              flex:1, border:'none', cursor:'pointer', borderRadius:9, padding:'8px 4px',
+              background: subTab===t.id ? 'var(--chocolate)' : 'transparent',
+              color: subTab===t.id ? 'var(--crema)' : 'var(--texto2)',
+              fontWeight: subTab===t.id ? 700 : 500, fontSize:11,
+              display:'flex', flexDirection:'column', alignItems:'center', gap:2,
+              transition:'all .15s',
+            }}>
+            <span style={{ fontSize:18 }}>{t.icon}</span>{t.lbl}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  // ── INGREDIENTES TAB ──────────────────────────────
+  const TabIngredientes = () => (
+    <div style={{ padding:'12px 16px 120px' }}>
+      <div style={{ background:'#FEF3E2', border:'1px solid #F39C12', borderRadius:10, padding:'10px 13px', marginBottom:14, fontSize:12, color:'#7D5A1A' }}>
+        💡 <b>Actualizá los precios regularmente.</b> En Argentina los precios cambian seguido. Mantenerlos al día hace que el cálculo sea preciso.
+      </div>
+      {ing.length === 0 && (
+        <div style={{ textAlign:'center', padding:'50px 20px', color:'var(--texto2)' }}>
+          <div style={{ fontSize:48 }}>🧂</div>
+          <p style={{ marginTop:10 }}>No hay ingredientes todavía.<br/>Tocá <b>+</b> para agregar.</p>
+        </div>
+      )}
+      {ing.map(item => {
+        const unitLabel = { kg:'/ kg', litro:'/ litro', docena:'/ docena', unidad:'/ unidad' }[item.unidad]||'';
+        return (
+          <div key={item.id} style={{ background:'var(--superficie)', borderRadius:14, padding:'14px 16px', marginBottom:10, border:'1px solid var(--beige)', boxShadow:'var(--sombra)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:10 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontWeight:700, fontSize:15, color:'var(--chocolate)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.nombre}</div>
+              <div style={{ fontSize:13, color:'var(--caramelo)', marginTop:2, fontWeight:600 }}>
+                {rcPeso(item.precio)} <span style={{ color:'var(--texto2)', fontWeight:400 }}>{unitLabel}</span>
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:7, flexShrink:0 }}>
+              <button onClick={() => setModIngr(item)}
+                style={{ ...S.btnSecundario, padding:'6px 11px', fontSize:13 }}>✏️</button>
+              <button onClick={() => {
+                if (!confirm('¿Eliminar este ingrediente?')) return;
+                saveIng(ing.filter(i => i.id !== item.id));
+              }}
+                style={{ ...S.btnSecundario, padding:'6px 11px', fontSize:13, color:'var(--rojo)' }}>🗑</button>
+            </div>
+          </div>
+        );
+      })}
+      <button onClick={() => setModIngr({})}
+        style={{ ...S.btnPrimario, width:'100%', padding:13, marginTop:6 }}>+ Nuevo ingrediente</button>
+    </div>
+  );
+
+  // ── RECETAS TAB ───────────────────────────────────
+  const TabRecetas = () => (
+    <div style={{ padding:'12px 16px 120px' }}>
+      {rec.length === 0 && (
+        <div style={{ textAlign:'center', padding:'50px 20px', color:'var(--texto2)' }}>
+          <div style={{ fontSize:48 }}>📖</div>
+          <p style={{ marginTop:10 }}>No hay recetas todavía.<br/>Tocá <b>+</b> para agregar.</p>
+        </div>
+      )}
+      {rec.map(r => {
+        const ct = costoRec(r);
+        return (
+          <div key={r.id} style={{ background:'var(--superficie)', borderRadius:14, padding:'16px', marginBottom:12, border:'1px solid var(--beige)', boxShadow:'var(--sombra)' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
+              <div>
+                <div style={{ fontSize:32, marginBottom:4 }}>{r.emoji}</div>
+                <div style={{ fontWeight:700, fontSize:16, color:'var(--chocolate)', lineHeight:1.25 }}>{r.nombre}</div>
+                <div style={{ fontSize:12, color:'var(--texto2)', marginTop:3 }}>{r.descripcion}</div>
+                <div style={{ fontSize:11, color:'var(--texto2)', marginTop:2 }}>📦 {r.rinde}</div>
+              </div>
+              <div style={{ textAlign:'right', flexShrink:0, marginLeft:8 }}>
+                <div style={{ fontSize:10, color:'var(--texto2)', marginBottom:2, textTransform:'uppercase', letterSpacing:'.5px' }}>Costo mat.</div>
+                <div style={{ fontFamily:'Playfair Display', fontSize:20, color:'var(--caramelo)', fontWeight:700 }}>{rcPeso(ct)}</div>
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:7, flexWrap:'wrap' }}>
+              <button onClick={() => setVerRec(r)}
+                style={{ ...S.btnPrimario, fontSize:12, padding:'7px 11px' }}>👁 Detalle</button>
+              <button onClick={() => { setCalcId(r.id); setSubTab('calcular'); }}
+                style={{ ...S.btnSecundario, fontSize:12, padding:'7px 11px', color:'var(--verde)', background:'#EAF7ED' }}>🧮 Calcular</button>
+              <button onClick={() => setModRec(r)}
+                style={{ ...S.btnSecundario, fontSize:12, padding:'7px 11px' }}>✏️ Editar</button>
+              <button onClick={() => { if (!confirm('¿Eliminar esta receta?')) return; saveRec(rec.filter(x => x.id !== r.id)); }}
+                style={{ ...S.btnSecundario, fontSize:12, padding:'7px 11px', color:'var(--rojo)' }}>🗑</button>
+            </div>
+          </div>
+        );
+      })}
+      <button onClick={() => setModRec({})}
+        style={{ ...S.btnPrimario, width:'100%', padding:13, marginTop:6 }}>+ Nueva receta</button>
+    </div>
+  );
+
+  // ── CALCULADORA TAB ───────────────────────────────
+  const TabCalcular = () => {
+    const recSel = rec.find(r => r.id === calcId);
+    const items  = recSel ? recSel.ingredientes.map(ir => {
+      const g = getIng(ir.ingId);
+      return { nombre: g ? g.nombre : '❓ Borrado', qty: rcFmtQty(g, ir.cantidad), c1: rcCostoItem(g, ir.cantidad) };
+    }) : [];
+    const costoBase = items.reduce((s, i) => s + i.c1, 0);
+    const costoProd = costoBase * calcN;
+    const precioUnit= costoBase * (1 + margen / 100);
+    const precioTot = precioUnit * calcN;
+    const ganancia  = precioTot - costoProd;
+
+    return (
+      <div style={{ padding:'12px 16px 120px' }}>
+        <div style={{ background:'var(--superficie)', borderRadius:14, padding:16, marginBottom:12, boxShadow:'var(--sombra)', border:'1px solid var(--beige)' }}>
+          <Campo label="Receta" value={calcId||''} onChange={v => setCalcId(v||null)} tipo="select">
+            <option value="">— Elegí una receta —</option>
+            {rec.map(r => <option key={r.id} value={r.id}>{r.emoji} {r.nombre}</option>)}
+          </Campo>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <Campo label="Cantidad a producir" value={calcN} onChange={v => setCalcN(Math.max(1,Number(v)||1))} tipo="number" placeholder="1" />
+            <Campo label="Margen ganancia %" value={margen} onChange={v => setMargen(Math.max(0,Number(v)||0))} tipo="number" placeholder="150" />
+          </div>
+          <div style={{ fontSize:11, color:'var(--texto2)', textAlign:'center', marginTop:-4 }}>
+            Margen recomendado: 150% (vendés 2.5× el costo)
+          </div>
+        </div>
+
+        {!recSel && (
+          <div style={{ textAlign:'center', padding:'40px 20px', color:'var(--texto2)' }}>
+            <div style={{ fontSize:48 }}>🧮</div>
+            <p style={{ marginTop:10 }}>Seleccioná una receta<br/>para ver el desglose de costos.</p>
+          </div>
+        )}
+
+        {recSel && (
+          <>
+            <div style={{ background:'var(--superficie)', borderRadius:14, padding:16, marginBottom:12, border:'1px solid var(--beige)', boxShadow:'var(--sombra)' }}>
+              <div style={{ fontWeight:700, fontSize:15, color:'var(--chocolate)', marginBottom:12 }}>
+                {recSel.emoji} {recSel.nombre} × {calcN}
+              </div>
+              {items.map((it, i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 0', borderBottom: i < items.length-1 ? '1px solid var(--beige)' : 'none', fontSize:13, gap:6 }}>
+                  <span style={{ flex:1, fontWeight:500 }}>{it.nombre}</span>
+                  <span style={{ color:'var(--texto2)', fontSize:12, minWidth:50, textAlign:'right' }}>{it.qty}</span>
+                  <span style={{ color:'var(--caramelo)', fontWeight:700, minWidth:72, textAlign:'right' }}>{rcPeso(it.c1 * calcN)}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ background:'var(--chocolate)', color:'var(--crema)', borderRadius:14, padding:18 }}>
+              {[
+                ['Costo materia prima (×'+calcN+')', rcPeso(costoProd), null],
+                ['Costo por unidad/porción', rcPeso(costoBase), null],
+                ['Margen de ganancia', margen+'%', 'var(--dorado)'],
+              ].map(([lbl, val, col], i) => (
+                <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'7px 0', fontSize:14, borderBottom:'1px solid rgba(253,245,230,0.1)' }}>
+                  <span style={{ opacity:.8 }}>{lbl}</span>
+                  <span style={{ fontWeight:700, color: col||'inherit' }}>{val}</span>
+                </div>
+              ))}
+              <div style={{ marginTop:16, paddingTop:14, borderTop:'1px solid rgba(253,245,230,0.2)' }}>
+                <div style={{ fontSize:10, opacity:.6, textTransform:'uppercase', letterSpacing:'.7px', marginBottom:4 }}>
+                  Precio de venta sugerido por unidad
+                </div>
+                <div style={{ fontFamily:'Playfair Display', fontSize:32, color:'var(--dorado)', fontWeight:700 }}>{rcPeso(precioUnit)}</div>
+                <div style={{ fontSize:11, opacity:.55, marginTop:4 }}>Rinde: {recSel.rinde}</div>
+              </div>
+              <div style={{ marginTop:14, paddingTop:12, borderTop:'1px solid rgba(253,245,230,0.15)' }}>
+                {[
+                  ['Venta total ('+calcN+' unid.)', rcPeso(precioTot), null],
+                  ['🎉 Ganancia neta', rcPeso(ganancia), '#5DADE2'],
+                ].map(([lbl,val,col],i) => (
+                  <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'5px 0', fontSize:14 }}>
+                    <span>{lbl}</span>
+                    <span style={{ fontWeight:700, color: col||'inherit' }}>{val}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ background:'var(--beige)', borderRadius:10, padding:'11px 14px', fontSize:12, color:'var(--texto2)', marginTop:10, lineHeight:1.5 }}>
+              ⚠️ <b>Importante:</b> estos son costos de materia prima solamente. Para el precio real también considerá: gas, mano de obra, packaging y gastos fijos.
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  // ── MODAL INGREDIENTE ─────────────────────────────
+  const ModalIngr = () => {
+    const isEdit = !!(modIngr && modIngr.id);
+    const [nombre, setNombre] = useState(modIngr ? modIngr.nombre||'' : '');
+    const [unidad, setUnidad] = useState(modIngr ? modIngr.unidad||'kg' : 'kg');
+    const [precio, setPrecio] = useState(modIngr ? modIngr.precio||'' : '');
+
+    const guardar = () => {
+      if (!nombre.trim()) return alert('Escribí el nombre del ingrediente');
+      const datos = { nombre: nombre.trim(), unidad, precio: parseFloat(precio)||0 };
+      if (isEdit) saveIng(ing.map(i => i.id === modIngr.id ? {...i,...datos} : i));
+      else        saveIng([...ing, { id: uid2(), ...datos }]);
+      setModIngr(null);
+    };
+
+    return (
+      <div style={{ position:'fixed', inset:0, background:'rgba(44,18,6,0.52)', zIndex:200, display:'flex', alignItems:'flex-end' }}
+        onClick={e => e.target === e.currentTarget && setModIngr(null)}>
+        <div style={{ background:'var(--superficie)', borderRadius:'20px 20px 0 0', padding:'24px 20px 44px', width:'100%', maxHeight:'85vh', overflowY:'auto' }}>
+          <h2 style={{ fontFamily:'Playfair Display', fontSize:20, color:'var(--chocolate)', marginBottom:16 }}>
+            {isEdit ? '✏️ Editar' : '🧂 Nuevo'} Ingrediente
+          </h2>
+          <Campo label="Nombre del ingrediente" value={nombre} onChange={setNombre} placeholder="Ej: Harina 0000" />
+          <label style={S.label}>Unidad de compra</label>
+          <select value={unidad} onChange={e => setUnidad(e.target.value)} style={{ ...S.input, marginBottom:14 }}>
+            <option value="kg">Kilogramo — precio por kg</option>
+            <option value="litro">Litro — precio por litro</option>
+            <option value="docena">Docena — precio por 12 unidades</option>
+            <option value="unidad">Unidad — precio por unidad</option>
+          </select>
+          <Campo label={`Precio por ${unidad} ($)`} value={precio} onChange={setPrecio} tipo="number" placeholder="0" />
+          <div style={{ fontSize:11, color:'var(--texto2)', marginBottom:14, background:'var(--beige)', borderRadius:8, padding:'8px 12px' }}>
+            💡 En recetas: kg→gramos, litro→ml, docena/unidad→unidades
+          </div>
+          <div style={{ display:'flex', gap:10 }}>
+            <button onClick={() => setModIngr(null)} style={{ ...S.btnSecundario, flex:1, padding:13 }}>Cancelar</button>
+            <button onClick={guardar} style={{ ...S.btnPrimario, flex:2, padding:13 }}>💾 Guardar</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── MODAL VER RECETA ──────────────────────────────
+  const ModalVerRec = () => {
+    const r = verRec;
+    if (!r) return null;
+    const ct = costoRec(r);
+    return (
+      <div style={{ position:'fixed', inset:0, background:'rgba(44,18,6,0.52)', zIndex:200, display:'flex', alignItems:'flex-end' }}
+        onClick={e => e.target === e.currentTarget && setVerRec(null)}>
+        <div style={{ background:'var(--superficie)', borderRadius:'20px 20px 0 0', padding:'24px 20px 44px', width:'100%', maxHeight:'90vh', overflowY:'auto' }}>
+          <h2 style={{ fontFamily:'Playfair Display', fontSize:20, color:'var(--chocolate)', marginBottom:4 }}>{r.emoji} {r.nombre}</h2>
+          <p style={{ fontSize:13, color:'var(--texto2)', marginBottom:4 }}>{r.descripcion}</p>
+          <p style={{ fontSize:12, color:'var(--texto2)', marginBottom:14 }}>📦 {r.rinde}</p>
+          {(r.ingredientes||[]).map((ir, i) => {
+            const g  = getIng(ir.ingId);
+            const c1 = rcCostoItem(g, ir.cantidad);
+            return (
+              <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 0', borderBottom:'1px solid var(--beige)', fontSize:13, gap:6 }}>
+                <span style={{ flex:1, fontWeight:500 }}>{g ? g.nombre : '❓ Borrado'}</span>
+                <span style={{ color:'var(--texto2)', fontSize:12 }}>{rcFmtQty(g, ir.cantidad)}</span>
+                <span style={{ color:'var(--caramelo)', fontWeight:700 }}>{rcPeso(c1)}</span>
+              </div>
+            );
+          })}
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:16, padding:'14px 16px', background:'var(--chocolate)', borderRadius:12, color:'var(--crema)' }}>
+            <span style={{ fontSize:14, opacity:.8 }}>Costo total materia prima</span>
+            <span style={{ fontFamily:'Playfair Display', fontSize:22, color:'var(--dorado)', fontWeight:700 }}>{rcPeso(ct)}</span>
+          </div>
+          <div style={{ display:'flex', gap:10, marginTop:14 }}>
+            <button onClick={() => setVerRec(null)} style={{ ...S.btnSecundario, flex:1, padding:13 }}>Cerrar</button>
+            <button onClick={() => { setCalcId(r.id); setSubTab('calcular'); setVerRec(null); }}
+              style={{ ...S.btnPrimario, flex:2, padding:13, background:'var(--verde)' }}>🧮 Ir a Calcular</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── MODAL EDITAR RECETA ───────────────────────────
+  const ModalEditRec = () => {
+    const isEdit = !!(modRec && modRec.id);
+    const [nombre, setNombre]   = useState(modRec ? modRec.nombre||'' : '');
+    const [emoji, setEmoji]     = useState(modRec ? modRec.emoji||'🍰' : '🍰');
+    const [desc, setDesc]       = useState(modRec ? modRec.descripcion||'' : '');
+    const [rinde, setRinde]     = useState(modRec ? modRec.rinde||'' : '');
+    const [checks, setChecks]   = useState(() => {
+      const m = {};
+      (modRec && modRec.ingredientes || []).forEach(ir => { m[ir.ingId] = ir.cantidad; });
+      return m;
+    });
+
+    const toggleIng = (id) => setChecks(prev => {
+      const next = {...prev};
+      if (next[id] !== undefined) delete next[id];
+      else next[id] = '';
+      return next;
+    });
+    const setQty = (id, v) => setChecks(prev => ({...prev, [id]: v}));
+
+    const guardar = () => {
+      if (!nombre.trim()) return alert('Escribí el nombre de la receta');
+      const ingredientes = Object.entries(checks)
+        .filter(([,v]) => v !== undefined)
+        .map(([ingId, cantidad]) => ({ ingId, cantidad: parseFloat(cantidad)||0 }));
+      const datos = { nombre: nombre.trim(), emoji: emoji||'🍰', descripcion: desc, rinde, ingredientes };
+      if (isEdit) saveRec(rec.map(r => r.id === modRec.id ? {...r,...datos} : r));
+      else        saveRec([...rec, { id: uid2(), ...datos }]);
+      setModRec(null);
+    };
+
+    return (
+      <div style={{ position:'fixed', inset:0, background:'rgba(44,18,6,0.52)', zIndex:200, display:'flex', alignItems:'flex-end' }}
+        onClick={e => e.target === e.currentTarget && setModRec(null)}>
+        <div style={{ background:'var(--superficie)', borderRadius:'20px 20px 0 0', padding:'24px 20px 44px', width:'100%', maxHeight:'92vh', overflowY:'auto' }}>
+          <h2 style={{ fontFamily:'Playfair Display', fontSize:20, color:'var(--chocolate)', marginBottom:16 }}>
+            {isEdit ? '✏️ Editar' : '📖 Nueva'} Receta
+          </h2>
+          <div style={{ display:'grid', gridTemplateColumns:'64px 1fr', gap:10 }}>
+            <Campo label="Emoji" value={emoji} onChange={setEmoji} placeholder="🍰" />
+            <Campo label="Nombre de la receta" value={nombre} onChange={setNombre} placeholder="Ej: Torta de vainilla" />
+          </div>
+          <Campo label="Descripción corta" value={desc} onChange={setDesc} placeholder="Ej: Con ganache de chocolate" />
+          <Campo label="¿Cuánto rinde?" value={rinde} onChange={setRinde} placeholder="Ej: 12 unidades / 8 porciones" />
+          <label style={S.label}>✅ Ingredientes y cantidades</label>
+          <div style={{ maxHeight:'32vh', overflowY:'auto', border:'1.5px solid var(--beige)', borderRadius:10, padding:'4px 12px', marginBottom:6 }}>
+            {ing.map(item => {
+              const sel = checks[item.id] !== undefined;
+              const hint= RC_UNIT_HINT[item.unidad]||'';
+              return (
+                <div key={item.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 0', borderBottom:'1px solid var(--beige)' }}>
+                  <input type="checkbox" checked={sel} onChange={() => toggleIng(item.id)}
+                    style={{ width:18, height:18, accentColor:'var(--caramelo)', flexShrink:0 }} />
+                  <label onClick={() => toggleIng(item.id)} style={{ flex:1, fontSize:13, cursor:'pointer' }}>{item.nombre}</label>
+                  <input type="number" min="0" value={sel ? (checks[item.id]||'') : ''} disabled={!sel}
+                    onChange={e => setQty(item.id, e.target.value)} placeholder="0"
+                    style={{ width:70, padding:'5px 8px', border:'1.5px solid var(--beige)', borderRadius:8, fontSize:13, textAlign:'center', background:'var(--crema)', opacity: sel?1:.35 }} />
+                  <span style={{ fontSize:11, color:'var(--texto2)', width:22 }}>{hint}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display:'flex', gap:10, marginTop:14 }}>
+            <button onClick={() => setModRec(null)} style={{ ...S.btnSecundario, flex:1, padding:13 }}>Cancelar</button>
+            <button onClick={guardar} style={{ ...S.btnPrimario, flex:2, padding:13 }}>💾 Guardar receta</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <Header titulo="🍰 Recetas & Costos" subtitulo="Calculadora de materia prima" />
+      <SubTab />
+      {subTab === 'ingredientes' && <TabIngredientes />}
+      {subTab === 'recetas'      && <TabRecetas />}
+      {subTab === 'calcular'     && <TabCalcular />}
+      {modIngr !== null && <ModalIngr />}
+      {verRec   !== null && <ModalVerRec />}
+      {modRec   !== null && <ModalEditRec />}
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════
 // APP PRINCIPAL
 // ══════════════════════════════════════════════════════
 function App() {
   const [user, setUser] = useState(undefined);
-  const [tab, setTab]   = useState('presupuestos');
+  const [tab, setTab]   = useState('pedidos');
 
   useEffect(() => {
     return auth.onAuthStateChanged(u => setUser(u));
@@ -1335,6 +1966,7 @@ function App() {
     stock:        <PantallaStock        uid={user.uid} />,
     historial:    <PantallaHistorial   uid={user.uid} />,
     presupuestos: <PantallaPresupuestos uid={user.uid} />,
+    recetas:      <PantallaRecetas />,
   };
 
   return (
