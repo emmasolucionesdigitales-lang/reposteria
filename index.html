@@ -907,7 +907,7 @@ function PantallaStock({ uid }) {
 function FormularioStock({ inicial, onGuardar, onCancelar }) {
   const UNIDADES = ['kg', 'g', 'lt', 'ml', 'unidades', 'tazas', 'cdas', 'cditas'];
   const [d, setD] = useState({
-    nombre: '', cantidad: 0, unidad: 'kg', stockMinimo: 0, costoUnitario: 0,
+    nombre: '', cantidad: 0, unidad: 'kg', stockMinimo: 0, costoUnitario: 0, margen: 50,
     ...inicial,
   });
   const set = (k, v) => setD(prev => ({ ...prev, [k]: v }));
@@ -1750,9 +1750,8 @@ function PantallaRecetas({ uid }) {
   // ── SUB-TABS BAR ──────────────────────────────────
   const SubTab = () => {
     const tabs2 = [
-      { id:'ingredientes', icon:'🧂', lbl:'Ingredientes' },
-      { id:'recetas',      icon:'📖', lbl:'Recetas'      },
-      { id:'calcular',     icon:'🧮', lbl:'Calcular'     },
+      { id:'recetas', icon:'📖', lbl:'Recetas' },
+      { id:'stock',   icon:'📦', lbl:'Stock'   },
     ];
     return (
       <div style={{ display:'flex', background:'var(--beige)', borderRadius:12, margin:'10px 16px 0', padding:4, gap:4 }}>
@@ -1774,7 +1773,7 @@ function PantallaRecetas({ uid }) {
   };
 
   // ── INGREDIENTES TAB ──────────────────────────────
-  const TabIngredientes = () => (
+  const TabStock = () => (
     <div style={{ padding:'12px 16px 120px' }}>
       <div style={{ background:'#FEF3E2', border:'1px solid #F39C12', borderRadius:10, padding:'10px 13px', marginBottom:14, fontSize:12, color:'#7D5A1A' }}>
         💡 <b>Actualizá los precios regularmente.</b> En Argentina los precios cambian seguido. Mantenerlos al día hace que el cálculo sea preciso.
@@ -1793,6 +1792,7 @@ function PantallaRecetas({ uid }) {
               <div style={{ fontWeight:700, fontSize:15, color:'var(--chocolate)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.nombre}</div>
               <div style={{ fontSize:13, color:'var(--caramelo)', marginTop:2, fontWeight:600 }}>
                 {rcPeso(item.precio)} <span style={{ color:'var(--texto2)', fontWeight:400 }}>{unitLabel}</span>
+                {item.margen > 0 && <span style={{ marginLeft:8, fontSize:11, background:'var(--beige)', color:'var(--cacao)', borderRadius:6, padding:'1px 6px' }}>+{item.margen}% · venta: {rcPeso(Math.round(item.precio*(1+item.margen/100)))}</span>}
               </div>
             </div>
             <div style={{ display:'flex', gap:7, flexShrink:0 }}>
@@ -1950,7 +1950,8 @@ function PantallaRecetas({ uid }) {
     const isEdit = !!(modIngr && modIngr.id);
     const [nombre, setNombre] = useState(modIngr ? modIngr.nombre||'' : '');
     const [unidad, setUnidad] = useState(modIngr ? modIngr.unidad||'kg' : 'kg');
-    const [precio, setPrecio] = useState(modIngr ? modIngr.precio||'' : '');
+    const [precio,    setPrecio]    = useState(modIngr ? modIngr.precio||'' : '');
+    const [margenIng, setMargenIng] = useState(modIngr ? modIngr.margen||50 : 50);
 
     const guardar = () => {
       if (!nombre.trim()) return alert('Escribí el nombre del ingrediente');
@@ -1975,7 +1976,13 @@ function PantallaRecetas({ uid }) {
             <option value="docena">Docena — precio por 12 unidades</option>
             <option value="unidad">Unidad — precio por unidad</option>
           </select>
-          <Campo label={`Precio por ${unidad} ($)`} value={precio} onChange={setPrecio} tipo="number" placeholder="0" />
+          <Campo label={`Precio de costo por ${unidad} ($)`} value={precio} onChange={setPrecio} tipo="number" placeholder="0" />
+          <Campo label="Margen de ganancia deseado (%)" value={margenIng} onChange={setMargenIng} tipo="number" placeholder="50" />
+          {precio > 0 && margenIng > 0 && (
+            <div style={{ fontSize:12, color:'var(--verde)', marginBottom:10, background:'rgba(39,174,96,0.08)', borderRadius:8, padding:'8px 12px', fontWeight:600 }}>
+              💰 Precio de venta sugerido: ${Math.round(precio*(1+margenIng/100)).toLocaleString('es-AR')} por {unidad}
+            </div>
+          )}
           <div style={{ fontSize:11, color:'var(--texto2)', marginBottom:14, background:'var(--beige)', borderRadius:8, padding:'8px 12px' }}>
             💡 En recetas: kg→gramos, litro→ml, docena/unidad→unidades
           </div>
@@ -2099,11 +2106,10 @@ function PantallaRecetas({ uid }) {
 
   return (
     <div>
-      <Header titulo="🍰 Recetas & Costos" subtitulo="Calculadora de materia prima" />
+      <Header titulo="🍰 Recetas" onAdd={() => subTab==='stock' ? setModIngr({}) : setModRec({})} />
       <SubTab />
-      {subTab === 'ingredientes' && <TabIngredientes />}
-      {subTab === 'recetas'      && <TabRecetas />}
-      {subTab === 'calcular'     && <TabCalcular />}
+      {subTab === 'recetas' && <TabRecetas />}
+      {subTab === 'stock'   && <TabStock />}
       {modIngr !== null && <ModalIngr />}
       {verRec   !== null && <ModalVerRec />}
       {modRec   !== null && <ModalEditRec />}
@@ -2114,420 +2120,378 @@ function PantallaRecetas({ uid }) {
 // ══════════════════════════════════════════════════════
 // APP PRINCIPAL
 
-// ══════════════════════════════════════════════════════════════════════
-// PANTALLA: PRODUCTOS (venta diaria desde planificación)
-// ══════════════════════════════════════════════════════════════════════
-function PantallaProductos({ uid, ingBase, recBase }) {
-  const hoy = () => new Date().toISOString().slice(0,10);
-  const [plan, setPlan] = useState([]);
-  const [catalogo, setCatalogo] = useState([]);
-  const [carrito, setCarrito] = useState([]);
-  const [pago, setPago] = useState('efectivo');
-  const [entrega, setEntrega] = useState('retira');
-  const [confirmado, setConfirmado] = useState(false);
-  const [cargando, setCargando] = useState(true);
-  const [verAdmin, setVerAdmin] = useState(false);
-
-  useEffect(() => {
-    const unsubCat = db.collection(`reposteria/${uid}/catalogo`).doc('items')
-      .onSnapshot(snap => {
-        setCatalogo(snap.exists ? (snap.data().data || []) : []);
-        setCargando(false);
-      });
-    const unsubPlan = db.collection(`reposteria/${uid}/planificacion`).doc(hoy())
-      .onSnapshot(snap => setPlan(snap.exists ? (snap.data().items || []) : []));
-    return () => { unsubCat(); unsubPlan(); };
-  }, [uid]);
-
-  const guardarCatalogo = async (cat) => {
-    await db.collection(`reposteria/${uid}/catalogo`).doc('items').set({ data: cat });
-    setCatalogo(cat);
-  };
-
-  const productosPlanificados = catalogo.filter(p =>
-    plan.some(i => i.productoId === p.id)
-  );
-
-  const agregarAlCarrito = (prod, opcion) => {
-    setCarrito(prev => {
-      const key = `${prod.id}_${opcion.id}`;
-      const existe = prev.find(i => i.key === key);
-      if (existe) return prev.map(i => i.key === key ? { ...i, cantidad: i.cantidad + 1 } : i);
-      return [...prev, { key, nombre: prod.nombre, emoji: prod.emoji, opcion, cantidad: 1 }];
-    });
-  };
-
-  const cambiarCantidad = (key, delta) => {
-    setCarrito(prev => prev.map(i => i.key === key
-      ? { ...i, cantidad: Math.max(0, i.cantidad + delta) }
-      : i
-    ).filter(i => i.cantidad > 0));
-  };
-
-  const total = carrito.reduce((s, i) => s + i.opcion.precio * i.cantidad, 0);
-
-  const confirmarVenta = async () => {
-    if (carrito.length === 0) return;
-    const venta = {
-      fecha: hoy(),
-      hora: new Date().toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}),
-      items: carrito.map(i => ({ nombre: i.emoji+' '+i.nombre, opcion: i.opcion.label, precio: i.opcion.precio, cantidad: i.cantidad, subtotal: i.opcion.precio * i.cantidad })),
-      total, pago, entrega,
-      tipo: 'mostrador',
-    };
-    await db.collection(`reposteria/${uid}/pedidos`).add(venta);
-    setCarrito([]);
-    setConfirmado(true);
-    setTimeout(() => setConfirmado(false), 3000);
-  };
-
-  if (verAdmin) return <AdminCatalogo uid={uid} catalogo={catalogo} onGuardar={guardarCatalogo} onVolver={() => setVerAdmin(false)} ingBase={ingBase} recBase={recBase} />;
-
-  const PAGOS = [['efectivo','💵 Efectivo'],['transferencia','📱 Transfer.'],['debito','💳 Débito'],['credito','💳 Crédito']];
-  const ENTREGAS = [['retira','🏪 Retira'],['envio','🛵 Envío']];
-
-  return (
-    <div style={{ paddingBottom: 80 }}>
-      <Header titulo="🧁 Productos" onAdd={() => setVerAdmin(true)} />
-
-      {cargando && <p style={{ textAlign:'center', padding:40, color:'var(--texto2)' }}>Cargando...</p>}
-
-      {!cargando && catalogo.length === 0 && (
-        <div style={{ textAlign:'center', padding:'48px 24px' }}>
-          <div style={{ fontSize:48, marginBottom:12 }}>🧁</div>
-          <p style={{ color:'var(--texto2)', marginBottom:16 }}>Todavía no hay productos en el catálogo.</p>
-          <button onClick={() => setVerAdmin(true)} style={{ ...S.btnPrimario, padding:'10px 20px' }}>+ Crear catálogo</button>
-        </div>
-      )}
-
-      {!cargando && catalogo.length > 0 && productosPlanificados.length === 0 && (
-        <div style={{ textAlign:'center', padding:'48px 24px' }}>
-          <div style={{ fontSize:48, marginBottom:12 }}>📐</div>
-          <p style={{ fontWeight:600, color:'var(--texto)', marginBottom:8 }}>No hay planificación para hoy</p>
-          <p style={{ color:'var(--texto2)', fontSize:14 }}>Cargá la planificación del día para ver los productos disponibles.</p>
-        </div>
-      )}
-
-      {!cargando && productosPlanificados.length > 0 && (
-        <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:0 }}>
-
-          {/* Lista de productos */}
-          <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:10 }}>
-            {productosPlanificados.map(prod => (
-              <div key={prod.id} className="card-base" style={{ padding:'10px 12px', marginBottom:0 }}>
-                <div style={{ fontWeight:600, fontSize:15, marginBottom:8, color:'var(--texto)' }}>{prod.emoji} {prod.nombre}</div>
-                <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                  {(prod.opciones||[]).map(op => (
-                    <div key={op.id} style={{ flex:'1 1 130px', background:'var(--crema)', border:'1px solid var(--beige)', borderRadius:10, padding:'8px 10px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                      <div>
-                        <div style={{ fontSize:11, color:'var(--texto2)' }}>{op.label}</div>
-                        <div style={{ fontSize:14, fontWeight:600, color:'var(--chocolate)' }}>${op.precio.toLocaleString('es-AR')}</div>
-                      </div>
-                      <button onClick={() => agregarAlCarrito(prod, op)} style={{ width:30, height:30, borderRadius:'50%', background:'var(--caramelo)', color:'white', border:'none', fontSize:20, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', lineHeight:1 }}>+</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Carrito */}
-          <div style={{ margin:'0 16px 16px', background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:14, padding:14 }}>
-            <p style={{ fontSize:12, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:10 }}>🛒 Carrito</p>
-
-            {carrito.length === 0 ? (
-              <p style={{ color:'var(--texto2)', fontSize:13, textAlign:'center', padding:'12px 0' }}>Agregá productos para armar la venta</p>
-            ) : (
-              <div style={{ display:'flex', flexDirection:'column', gap:6, marginBottom:12 }}>
-                {carrito.map(i => (
-                  <div key={i.key} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--crema)', borderRadius:8, padding:'7px 10px' }}>
-                    <div style={{ minWidth:0, flex:1 }}>
-                      <div style={{ fontSize:13, fontWeight:500, color:'var(--texto)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{i.emoji} {i.nombre} · {i.opcion.label}</div>
-                      <div style={{ fontSize:11, color:'var(--texto2)' }}>${i.opcion.precio.toLocaleString('es-AR')} c/u</div>
-                    </div>
-                    <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
-                      <button onClick={() => cambiarCantidad(i.key,-1)} style={{ width:22, height:22, borderRadius:'50%', border:'1px solid var(--beige2)', background:'none', cursor:'pointer', color:'var(--texto)', fontSize:14 }}>-</button>
-                      <span style={{ fontSize:14, fontWeight:600, color:'var(--texto)', minWidth:20, textAlign:'center' }}>{i.cantidad}</span>
-                      <button onClick={() => cambiarCantidad(i.key,+1)} style={{ width:22, height:22, borderRadius:'50%', border:'1px solid var(--beige2)', background:'none', cursor:'pointer', color:'var(--texto)', fontSize:14 }}>+</button>
-                      <span style={{ fontSize:13, fontWeight:600, color:'var(--chocolate)', minWidth:60, textAlign:'right' }}>${(i.opcion.precio*i.cantidad).toLocaleString('es-AR')}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Forma de pago */}
-            <p style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:6 }}>Forma de pago</p>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:5, marginBottom:10 }}>
-              {PAGOS.map(([k,l]) => (
-                <button key={k} onClick={() => setPago(k)} style={{ padding:'7px 4px', borderRadius:8, fontSize:12, fontWeight:pago===k?700:400, border:pago===k?'2px solid var(--caramelo)':'1px solid var(--beige)', background:pago===k?'var(--beige)':'none', color:'var(--texto)', cursor:'pointer' }}>{l}</button>
-              ))}
-            </div>
-
-            {/* Entrega */}
-            <p style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:6 }}>Entrega</p>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:5, marginBottom:12 }}>
-              {ENTREGAS.map(([k,l]) => (
-                <button key={k} onClick={() => setEntrega(k)} style={{ padding:'7px 4px', borderRadius:8, fontSize:12, fontWeight:entrega===k?700:400, border:entrega===k?'2px solid var(--caramelo)':'1px solid var(--beige)', background:entrega===k?'var(--beige)':'none', color:'var(--texto)', cursor:'pointer' }}>{l}</button>
-              ))}
-            </div>
-
-            {/* Total y confirmar */}
-            <div style={{ borderTop:'1px solid var(--beige)', paddingTop:10 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-                <span style={{ fontSize:15, fontWeight:700, color:'var(--texto)' }}>Total</span>
-                <span style={{ fontSize:20, fontWeight:700, color:'var(--chocolate)' }}>${total.toLocaleString('es-AR')}</span>
-              </div>
-              {confirmado && <div style={{ background:'#d4edda', color:'#155724', borderRadius:8, padding:'8px 12px', fontSize:13, textAlign:'center', marginBottom:8 }}>✅ Venta confirmada</div>}
-              <button onClick={confirmarVenta} disabled={carrito.length===0} style={{ ...S.btnPrimario, width:'100%', opacity:carrito.length===0?0.5:1 }}>✓ Confirmar venta</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════
-// ADMIN: Catálogo de productos
-// ══════════════════════════════════════════════════════════════════════
-function AdminCatalogo({ uid, catalogo, onGuardar, onVolver, ingBase, recBase }) {
-  const [lista, setLista] = useState(JSON.parse(JSON.stringify(catalogo)));
-  const [editando, setEditando] = useState(null); // null | producto
-
-  const nuevo = () => setEditando({ id:'p'+Date.now(), emoji:'🎂', nombre:'', opciones:[] });
-
-  const guardar = (prod) => {
-    const nueva = editando.id && lista.find(p=>p.id===editando.id)
-      ? lista.map(p => p.id===prod.id ? prod : p)
-      : [...lista, prod];
-    setLista(nueva);
-    setEditando(null);
-    onGuardar(nueva);
-  };
-
-  const eliminar = (id) => {
-    const nueva = lista.filter(p => p.id !== id);
-    setLista(nueva);
-    onGuardar(nueva);
-  };
-
-  if (editando !== null) return <FormProductoCatalogo inicial={editando} onGuardar={guardar} onCancelar={() => setEditando(null)} recBase={recBase} />;
-
-  return (
-    <div style={{ paddingBottom:80 }}>
-      <Header titulo="📋 Catálogo" onBack={onVolver} onAdd={nuevo} />
-      <div style={{ padding:'12px 16px' }}>
-        {lista.length === 0 && <p style={{ color:'var(--texto2)', textAlign:'center', padding:'32px 0' }}>No hay productos. Tocá + para agregar.</p>}
-        {lista.map(p => (
-          <div key={p.id} className="card-base" style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <div>
-              <div style={{ fontWeight:600, fontSize:15, color:'var(--texto)' }}>{p.emoji} {p.nombre}</div>
-              <div style={{ fontSize:12, color:'var(--texto2)', marginTop:2 }}>{(p.opciones||[]).map(o=>o.label).join(' · ')}</div>
-            </div>
-            <div style={{ display:'flex', gap:6 }}>
-              <button onClick={() => setEditando(p)} style={{ ...S.btn, fontSize:12 }}>✏️</button>
-              <button onClick={() => eliminar(p.id)} style={{ ...S.btn, fontSize:12, color:'var(--rojo)' }}>🗑️</button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function FormProductoCatalogo({ inicial, onGuardar, onCancelar, recBase }) {
-  const [nombre, setNombre] = useState(inicial.nombre);
-  const [emoji, setEmoji] = useState(inicial.emoji);
-  const [opciones, setOpciones] = useState(inicial.opciones||[]);
-
-  const agregarOpcion = () => setOpciones(prev => [...prev, { id:'o'+Date.now(), label:'', precio:0, unidad:'unidad', recetaId:'', factorReceta:1 }]);
-  const editarOpcion = (id, campo, val) => setOpciones(prev => prev.map(o => o.id===id ? {...o, [campo]:val} : o));
-  const quitarOpcion = (id) => setOpciones(prev => prev.filter(o => o.id !== id));
-
-  const guardar = () => {
-    if (!nombre.trim()) return;
-    onGuardar({ ...inicial, nombre:nombre.trim(), emoji, opciones });
-  };
-
-  return (
-    <div style={{ paddingBottom:80 }}>
-      <Header titulo={inicial.nombre||'Nuevo producto'} onBack={onCancelar} />
-      <div style={{ padding:'16px' }}>
-        <div style={{ display:'flex', gap:10, marginBottom:14 }}>
-          <input value={emoji} onChange={e=>setEmoji(e.target.value)} style={{ width:52, padding:'10px 0', borderRadius:10, border:'1px solid var(--beige)', textAlign:'center', fontSize:22, background:'var(--superficie)', color:'var(--texto)' }} />
-          <input value={nombre} onChange={e=>setNombre(e.target.value)} placeholder="Nombre del producto" style={{ flex:1, ...S.inp }} />
-        </div>
-
-        <p style={{ fontSize:12, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:8 }}>Opciones de venta</p>
-        {opciones.map(op => (
-          <div key={op.id} className="card-base" style={{ padding:12, marginBottom:8 }}>
-            <div style={{ display:'flex', gap:8, marginBottom:8 }}>
-              <input value={op.label} onChange={e=>editarOpcion(op.id,'label',e.target.value)} placeholder="Ej: Por porción / Entera / Promo docena" style={{ flex:2, ...S.inp }} />
-              <input type="number" value={op.precio||''} onChange={e=>editarOpcion(op.id,'precio',Number(e.target.value))} placeholder="Precio" style={{ flex:1, ...S.inp }} />
-            </div>
-            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-              <select value={op.recetaId||''} onChange={e=>editarOpcion(op.id,'recetaId',e.target.value)} style={{ flex:2, ...S.inp }}>
-                <option value=''>Sin receta vinculada</option>
-                {(recBase||[]).map(r => <option key={r.id} value={r.id}>{r.emoji} {r.nombre}</option>)}
-              </select>
-              <input type="number" value={op.factorReceta||1} onChange={e=>editarOpcion(op.id,'factorReceta',Number(e.target.value))} step="0.1" title="Factor (1 = 1 receta completa, 0.1 = 1/10)" style={{ width:60, ...S.inp }} />
-              <button onClick={() => quitarOpcion(op.id)} style={{ color:'var(--rojo)', background:'none', border:'none', cursor:'pointer', fontSize:18 }}>✕</button>
-            </div>
-            <p style={{ fontSize:10, color:'var(--texto2)', marginTop:4 }}>Factor: 1 = receta completa, 0.1 = 1/10 de receta (una porción de 10)</p>
-          </div>
-        ))}
-        <button onClick={agregarOpcion} style={{ ...S.btn, width:'100%', marginBottom:16 }}>+ Agregar opción</button>
-        <button onClick={guardar} style={{ ...S.btnPrimario, width:'100%' }}>Guardar producto</button>
-      </div>
-    </div>
-  );
-}
 
 // ══════════════════════════════════════════════════════════════════════
 // PANTALLA: PLANIFICACIÓN DE VENTA
+// Planilla diaria basada en recetas → genera los productos del día
 // ══════════════════════════════════════════════════════════════════════
 function PantallaPlanificacion({ uid, ingBase, recBase }) {
   const hoy = () => new Date().toISOString().slice(0,10);
-  const [catalogo, setCatalogo] = useState([]);
-  const [stock, setStock] = useState([]);
-  const [items, setItems] = useState([]);
-  const [guardado, setGuardado] = useState(false);
-  const [cargando, setCargando] = useState(true);
+  const [stock, setStock]         = useState([]);
+  const [planItems, setPlanItems] = useState([]);
+  const [guardado, setGuardado]   = useState(false);
+  const [editOpciones, setEditOpciones] = useState(null); // recetaId en edición
 
   useEffect(() => {
-    const u1 = db.collection(`reposteria/${uid}/catalogo`).doc('items')
-      .onSnapshot(snap => { setCatalogo(snap.exists ? (snap.data().data||[]) : []); setCargando(false); });
-    const u2 = db.collection(`reposteria/${uid}/stock`).orderBy('nombre','asc')
-      .onSnapshot(snap => setStock(snap.docs.map(d => ({id:d.id,...d.data()}))));
-    const u3 = db.collection(`reposteria/${uid}/planificacion`).doc(hoy())
-      .onSnapshot(snap => { if(snap.exists) setItems(snap.data().items||[]); });
-    return () => { u1(); u2(); u3(); };
+    const u1 = db.collection(`reposteria/${uid}/stock`).orderBy('nombre','asc')
+      .onSnapshot(snap => setStock(snap.docs.map(d=>({id:d.id,...d.data()}))));
+    const u2 = db.collection(`reposteria/${uid}/planificacion`).doc(hoy())
+      .onSnapshot(snap => { if(snap.exists) setPlanItems(snap.data().items||[]); });
+    return () => { u1(); u2(); };
   }, [uid]);
 
-  const cambiarCantidad = (productoId, delta) => {
-    setItems(prev => {
-      const existe = prev.find(i => i.productoId===productoId);
+  // ── Helpers ────────────────────────────────────────────────────────
+  const getItem = (recId) => planItems.find(i=>i.recetaId===recId);
+
+  const setCantidad = (rec, cant) => {
+    cant = Math.max(0, cant);
+    setPlanItems(prev => {
+      const existe = prev.find(i=>i.recetaId===rec.id);
       if (existe) {
-        const nueva = Math.max(0, existe.cantidad + delta);
-        return nueva === 0 ? prev.filter(i=>i.productoId!==productoId) : prev.map(i=>i.productoId===productoId?{...i,cantidad:nueva}:i);
+        if (cant === 0) return prev.filter(i=>i.recetaId!==rec.id);
+        return prev.map(i=>i.recetaId===rec.id ? {...i, cantidad:cant} : i);
       }
-      const prod = catalogo.find(p=>p.id===productoId);
-      return [...prev, { productoId, nombre:prod.nombre, emoji:prod.emoji, cantidad:1 }];
+      if (cant === 0) return prev;
+      return [...prev, {
+        recetaId: rec.id, recetaNombre: rec.nombre, recetaEmoji: rec.emoji||'🍰',
+        cantidad: cant,
+        opciones: [{ id:'o'+Date.now(), label:'Por unidad', precio:0 }]
+      }];
     });
   };
 
-  // Calcular ingredientes necesarios
-  const calcularIngredientes = () => {
-    const totales = {};
-    for (const item of items) {
-      const prod = catalogo.find(p=>p.id===item.productoId);
-      if (!prod) continue;
-      const op = (prod.opciones||[])[0]; // primera opción para planificar
-      if (!op || !op.recetaId) continue;
-      const rec = (recBase||[]).find(r=>r.id===op.recetaId);
+  const guardarOpciones = (recId, opciones) => {
+    setPlanItems(prev => prev.map(i=>i.recetaId===recId ? {...i, opciones} : i));
+    setEditOpciones(null);
+  };
+
+  // ── Calcular ingredientes totales ──────────────────────────────────
+  const calcIngredientes = () => {
+    const tot = {};
+    for (const item of planItems) {
+      const rec = (recBase||[]).find(r=>r.id===item.recetaId);
       if (!rec) continue;
-      const factor = (op.factorReceta||1) * item.cantidad;
       for (const ri of (rec.ingredientes||[])) {
-        totales[ri.ingId] = (totales[ri.ingId]||0) + ri.cantidad * factor;
+        tot[ri.ingId] = (tot[ri.ingId]||0) + ri.cantidad * item.cantidad;
       }
     }
-    return totales;
+    return tot;
   };
+  const ingNecesarios = calcIngredientes();
 
-  const ingNecesarios = calcularIngredientes();
-
-  const getStockIng = (ingId) => {
+  const getStockInfo = (ingId) => {
     const ing = (ingBase||[]).find(i=>i.id===ingId);
     if (!ing) return null;
-    const stk = stock.find(s=>s.nombre===ing.nombre);
-    return { ing, stockCantidad: stk ? Number(stk.cantidad)||0 : 0, unidad: ing.unidad };
+    const stk = stock.find(s => s.nombre === ing.nombre);
+    const disponible = stk ? Number(stk.cantidad)||0 : 0;
+    return { ing, disponible };
   };
 
-  const faltaAlgo = Object.entries(ingNecesarios).some(([ingId, cant]) => {
-    const s = getStockIng(ingId);
-    if (!s) return false;
-    // Convertir kg a gramos aproximado si unidad es kg
-    const stockEnUnidad = s.stockCantidad;
-    return cant > stockEnUnidad * 1000 && s.ing.unidad === 'kg' || (s.ing.unidad !== 'kg' && cant > stockEnUnidad);
-  });
-
   const guardar = async () => {
-    await db.collection(`reposteria/${uid}/planificacion`).doc(hoy()).set({ fecha:hoy(), items });
+    await db.collection(`reposteria/${uid}/planificacion`).doc(hoy())
+      .set({ fecha: hoy(), items: planItems });
     setGuardado(true);
     setTimeout(() => setGuardado(false), 3000);
   };
 
+  // ── Modal opciones de venta ────────────────────────────────────────
+  if (editOpciones !== null) {
+    const item = planItems.find(i=>i.recetaId===editOpciones);
+    return <ModalOpciones item={item} onGuardar={ops=>guardarOpciones(editOpciones,ops)} onCancelar={()=>setEditOpciones(null)} />;
+  }
+
+  const hayPlan = planItems.length > 0;
+  const hayAlerta = Object.entries(ingNecesarios).some(([ingId, cant]) => {
+    const s = getStockInfo(ingId); if(!s) return false;
+    const dispGr = s.ing.unidad==='kg' ? s.disponible*1000 : s.disponible;
+    return cant > dispGr;
+  });
+
   return (
     <div style={{ paddingBottom:80 }}>
-      <Header titulo="📐 Planificación" subtitulo={new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'})} />
+      <Header titulo="📐 Planificación" subtitulo={new Date().toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short'})} />
 
-      {cargando && <p style={{ textAlign:'center', padding:40, color:'var(--texto2)' }}>Cargando...</p>}
+      <div style={{ padding:'12px 16px' }}>
 
-      {!cargando && catalogo.length === 0 && (
-        <div style={{ textAlign:'center', padding:'48px 24px' }}>
-          <div style={{ fontSize:48 }}>🧁</div>
-          <p style={{ color:'var(--texto2)', marginTop:12 }}>Primero creá el catálogo de productos desde la pantalla de Productos.</p>
-        </div>
-      )}
+        {/* ── Planilla de producción ── */}
+        <p style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:10 }}>¿Qué vas a producir hoy?</p>
 
-      {!cargando && catalogo.length > 0 && (
-        <div style={{ padding:'12px 16px' }}>
-
-          {/* Selector de productos */}
-          <p style={{ fontSize:12, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:10 }}>¿Qué vas a hacer hoy?</p>
-          <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:16 }}>
-            {catalogo.map(prod => {
-              const item = items.find(i=>i.productoId===prod.id);
-              const cant = item ? item.cantidad : 0;
-              return (
-                <div key={prod.id} style={{ background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:12, padding:'10px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                  <span style={{ fontSize:15, fontWeight:500, color:'var(--texto)' }}>{prod.emoji} {prod.nombre}</span>
-                  <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                    <button onClick={() => cambiarCantidad(prod.id,-1)} style={{ width:28, height:28, borderRadius:'50%', border:'1px solid var(--beige2)', background:'none', cursor:'pointer', color:'var(--texto)', fontSize:16 }}>-</button>
-                    <span style={{ fontSize:16, fontWeight:700, color:cant>0?'var(--chocolate)':'var(--texto2)', minWidth:24, textAlign:'center' }}>{cant}</span>
-                    <button onClick={() => cambiarCantidad(prod.id,+1)} style={{ width:28, height:28, borderRadius:'50%', background:cant>0?'var(--caramelo)':'none', border:'1px solid var(--beige2)', cursor:'pointer', color:cant>0?'white':'var(--texto)', fontSize:16 }}>+</button>
-                  </div>
-                </div>
-              );
-            })}
+        <div style={{ background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:14, overflow:'hidden', marginBottom:16 }}>
+          {/* Header tabla */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 90px 40px', gap:0, background:'var(--beige)', padding:'8px 14px', borderBottom:'1px solid var(--beige2)' }}>
+            <span style={{ fontSize:11, fontWeight:700, color:'var(--texto2)' }}>RECETA</span>
+            <span style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textAlign:'center' }}>CANTIDAD</span>
+            <span style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textAlign:'center' }}>💰</span>
           </div>
 
-          {/* Ingredientes necesarios */}
-          {items.length > 0 && Object.keys(ingNecesarios).length > 0 && (
-            <div>
-              <p style={{ fontSize:12, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:10 }}>
-                Ingredientes necesarios {faltaAlgo && <span style={{ color:'var(--naranja)' }}>· ⚠️ Falta stock</span>}
-              </p>
-              <div style={{ background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:12, overflow:'hidden', marginBottom:16 }}>
-                {Object.entries(ingNecesarios).map(([ingId, cant]) => {
-                  const s = getStockIng(ingId);
-                  if (!s) return null;
-                  const cantGr = cant;
-                  const stockGr = s.ing.unidad === 'kg' ? s.stockCantidad * 1000 : s.stockCantidad;
-                  const falta = cantGr > stockGr;
-                  const cantLabel = s.ing.unidad === 'kg' ? (cant >= 1000 ? (cant/1000).toFixed(2)+' kg' : cant+'g') : cant+' '+s.ing.unidad;
-                  const stokLabel = s.ing.unidad === 'kg' ? s.stockCantidad.toFixed(2)+' kg' : s.stockCantidad+' '+s.ing.unidad;
-                  return (
-                    <div key={ingId} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'9px 14px', borderBottom:'1px solid var(--beige)', background: falta ? 'rgba(230,126,34,0.07)' : 'transparent' }}>
-                      <span style={{ fontSize:13, color:'var(--texto)', fontWeight: falta ? 600 : 400 }}>{s.ing.nombre}</span>
-                      <div style={{ textAlign:'right' }}>
-                        <div style={{ fontSize:13, fontWeight:600, color: falta ? 'var(--naranja)' : 'var(--verde)' }}>{cantLabel} {falta ? '⚠️' : '✅'}</div>
-                        <div style={{ fontSize:10, color:'var(--texto2)' }}>Stock: {stokLabel}</div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+          {(recBase||[]).length === 0 && (
+            <div style={{ padding:'24px', textAlign:'center', color:'var(--texto2)', fontSize:14 }}>
+              No hay recetas cargadas. Andá a Recetas y creá las primeras.
             </div>
           )}
 
-          {guardado && <div style={{ background:'#d4edda', color:'#155724', borderRadius:10, padding:'10px 14px', textAlign:'center', marginBottom:12 }}>✅ Planificación guardada</div>}
-          <button onClick={guardar} disabled={items.length===0} style={{ ...S.btnPrimario, width:'100%', opacity:items.length===0?0.5:1 }}>
-            Guardar planificación del día
-          </button>
+          {(recBase||[]).map((rec, idx) => {
+            const item = getItem(rec.id);
+            const cant = item ? item.cantidad : 0;
+            const tieneOpciones = item && item.opciones && item.opciones.some(o=>o.precio>0);
+            return (
+              <div key={rec.id} style={{ display:'grid', gridTemplateColumns:'1fr 90px 40px', gap:0, padding:'10px 14px', borderBottom: idx < recBase.length-1 ? '1px solid var(--beige)' : 'none', alignItems:'center', background: cant>0 ? 'rgba(160,98,42,0.05)' : 'transparent' }}>
+                <div>
+                  <span style={{ fontSize:14, fontWeight:cant>0?700:400, color:'var(--texto)' }}>{rec.emoji||'🍰'} {rec.nombre}</span>
+                  {cant>0 && (
+                    <div style={{ fontSize:11, color: tieneOpciones?'var(--verde)':'var(--naranja)', marginTop:2 }}>
+                      {tieneOpciones ? '✅ Precios cargados' : '⚠️ Sin precios de venta'}
+                    </div>
+                  )}
+                </div>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                  <button onClick={()=>setCantidad(rec, cant-1)} style={{ width:26, height:26, borderRadius:'50%', border:'1px solid var(--beige2)', background:'none', cursor:'pointer', color:'var(--texto)', fontSize:14 }}>-</button>
+                  <span style={{ fontSize:15, fontWeight:700, color:cant>0?'var(--chocolate)':'var(--texto2)', minWidth:20, textAlign:'center' }}>{cant}</span>
+                  <button onClick={()=>setCantidad(rec, cant+1)} style={{ width:26, height:26, borderRadius:'50%', background:cant>0?'var(--caramelo)':'none', border:'1px solid var(--beige2)', cursor:'pointer', color:cant>0?'white':'var(--texto)', fontSize:14 }}>+</button>
+                </div>
+                <div style={{ textAlign:'center' }}>
+                  {cant>0 && (
+                    <button onClick={()=>setEditOpciones(rec.id)} title="Definir precios de venta"
+                      style={{ width:32, height:32, borderRadius:8, border:'1px solid var(--beige2)', background: tieneOpciones?'var(--verde)':'var(--beige)', color: tieneOpciones?'white':'var(--texto2)', cursor:'pointer', fontSize:14 }}>
+                      💰
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
-      )}
+
+        {/* ── Resumen de ingredientes ── */}
+        {hayPlan && Object.keys(ingNecesarios).length > 0 && (
+          <div style={{ marginBottom:16 }}>
+            <p style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:8 }}>
+              Ingredientes necesarios {hayAlerta && <span style={{ color:'var(--naranja)' }}>· ⚠️ Falta stock</span>}
+            </p>
+            <div style={{ background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:12, overflow:'hidden' }}>
+              {Object.entries(ingNecesarios).map(([ingId, cant], idx, arr) => {
+                const s = getStockInfo(ingId);
+                if (!s) return null;
+                const esKg = s.ing.unidad === 'kg';
+                const dispGr = esKg ? s.disponible * 1000 : s.disponible;
+                const falta = cant > dispGr;
+                const cantLabel = esKg ? (cant>=1000?(cant/1000).toFixed(2)+' kg':cant+'g') : cant+' '+s.ing.unidad;
+                const dispLabel = esKg ? s.disponible.toFixed(2)+' kg' : s.disponible+' '+s.ing.unidad;
+                return (
+                  <div key={ingId} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 12px', borderBottom: idx<arr.length-1?'1px solid var(--beige)':'none', background: falta?'rgba(230,126,34,0.06)':'transparent' }}>
+                    <span style={{ fontSize:13, color:'var(--texto)', fontWeight:falta?600:400 }}>{s.ing.nombre}</span>
+                    <div style={{ textAlign:'right' }}>
+                      <span style={{ fontSize:13, fontWeight:600, color:falta?'var(--naranja)':'var(--verde)' }}>{cantLabel} {falta?'⚠️':'✅'}</span>
+                      <div style={{ fontSize:10, color:'var(--texto2)' }}>Stock: {dispLabel}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {guardado && <div style={{ background:'#d4edda', color:'#155724', borderRadius:10, padding:'10px', textAlign:'center', marginBottom:12, fontSize:13 }}>✅ Planificación guardada — Productos actualizados</div>}
+
+        <button onClick={guardar} disabled={!hayPlan}
+          style={{ ...S.btnPrimario, width:'100%', opacity:hayPlan?1:0.4 }}>
+          Guardar planificación del día
+        </button>
+
+      </div>
+    </div>
+  );
+}
+
+// ── Modal para definir opciones de venta de un producto planificado ──
+function ModalOpciones({ item, onGuardar, onCancelar }) {
+  const [opciones, setOpciones] = useState(
+    item.opciones && item.opciones.length > 0
+      ? item.opciones
+      : [{ id:'o'+Date.now(), label:'Por unidad', precio:0 }]
+  );
+  const agregar = () => setOpciones(p=>[...p,{id:'o'+Date.now(),label:'',precio:0}]);
+  const editar  = (id,k,v) => setOpciones(p=>p.map(o=>o.id===id?{...o,[k]:v}:o));
+  const quitar  = (id) => setOpciones(p=>p.filter(o=>o.id!==id));
+
+  return (
+    <div style={{ paddingBottom:80 }}>
+      <Header titulo={`💰 ${item.recetaEmoji} ${item.recetaNombre}`} onBack={onCancelar} />
+      <div style={{ padding:'16px' }}>
+        <p style={{ color:'var(--texto2)', fontSize:13, marginBottom:16 }}>Definí cómo vas a vender este producto hoy. Podés tener varias opciones (por porción, entero, promo docena, etc.)</p>
+        {opciones.map((op,idx) => (
+          <div key={op.id} style={{ display:'flex', gap:8, marginBottom:10, alignItems:'center' }}>
+            <input value={op.label} onChange={e=>editar(op.id,'label',e.target.value)}
+              placeholder="Ej: Por porción / Entera / Promo docena"
+              style={{ flex:2, ...S.inp }} />
+            <div style={{ display:'flex', alignItems:'center', border:'1px solid var(--beige)', borderRadius:10, overflow:'hidden', flex:1 }}>
+              <span style={{ padding:'0 8px', color:'var(--texto2)', fontSize:13 }}>$</span>
+              <input type="number" value={op.precio||''} onChange={e=>editar(op.id,'precio',Number(e.target.value))}
+                placeholder="0" style={{ border:'none', outline:'none', padding:'10px 6px 10px 0', width:'100%', background:'var(--superficie)', color:'var(--texto)', fontSize:14 }} />
+            </div>
+            {opciones.length > 1 && (
+              <button onClick={()=>quitar(op.id)} style={{ color:'var(--rojo)', background:'none', border:'none', cursor:'pointer', fontSize:18, padding:'0 4px' }}>✕</button>
+            )}
+          </div>
+        ))}
+        <button onClick={agregar} style={{ ...S.btn, width:'100%', marginBottom:16 }}>+ Agregar otra opción</button>
+        <button onClick={()=>onGuardar(opciones)} style={{ ...S.btnPrimario, width:'100%' }}>Guardar precios</button>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// PANTALLA: PRODUCTOS (venta diaria — viene de la planificación)
+// ══════════════════════════════════════════════════════════════════════
+function PantallaProductos({ uid }) {
+  const hoy = () => new Date().toISOString().slice(0,10);
+  const [planItems, setPlanItems] = useState(null);
+  const [carrito,   setCarrito]   = useState([]);
+  const [pago,      setPago]      = useState('efectivo');
+  const [entrega,   setEntrega]   = useState('retira');
+  const [confirmado,setConfirmado]= useState(false);
+
+  useEffect(() => {
+    return db.collection(`reposteria/${uid}/planificacion`).doc(hoy())
+      .onSnapshot(snap => setPlanItems(snap.exists ? (snap.data().items||[]) : []));
+  }, [uid]);
+
+  const productosDelDia = (planItems||[]).filter(i => i.opciones && i.opciones.some(o=>o.precio>0));
+
+  const agregar = (item, op) => {
+    const key = `${item.recetaId}_${op.id}`;
+    setCarrito(prev => {
+      const e = prev.find(i=>i.key===key);
+      if (e) return prev.map(i=>i.key===key?{...i,cantidad:i.cantidad+1}:i);
+      return [...prev, { key, emoji:item.recetaEmoji, nombre:item.recetaNombre, opLabel:op.label, precio:op.precio, cantidad:1 }];
+    });
+  };
+
+  const cambiar = (key, delta) => {
+    setCarrito(prev => prev.map(i=>i.key===key?{...i,cantidad:Math.max(0,i.cantidad+delta)}:i).filter(i=>i.cantidad>0));
+  };
+
+  const total = carrito.reduce((s,i)=>s+i.precio*i.cantidad, 0);
+
+  const confirmar = async () => {
+    if (!carrito.length) return;
+    await db.collection(`reposteria/${uid}/pedidos`).add({
+      fecha: hoy(),
+      hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+      tipo: 'mostrador',
+      items: carrito.map(i=>({ nombre:`${i.emoji} ${i.nombre}`, opcion:i.opLabel, precio:i.precio, cantidad:i.cantidad, subtotal:i.precio*i.cantidad })),
+      total, pago, entrega,
+    });
+    setCarrito([]);
+    setConfirmado(true);
+    setTimeout(()=>setConfirmado(false), 3000);
+  };
+
+  const PAGOS    = [['efectivo','💵 Efectivo'],['transferencia','📱 Transfer.'],['debito','💳 Débito'],['credito','💳 Crédito']];
+  const ENTREGAS = [['retira','🏪 Retira'],['envio','🛵 Envío']];
+
+  if (planItems === null) return <div style={{textAlign:'center',padding:40,color:'var(--texto2)'}}>Cargando...</div>;
+
+  if (planItems.length === 0) return (
+    <div style={{paddingBottom:80}}>
+      <Header titulo="🧁 Productos" />
+      <div style={{textAlign:'center',padding:'60px 24px'}}>
+        <div style={{fontSize:48,marginBottom:12}}>📐</div>
+        <p style={{fontWeight:600,color:'var(--texto)',marginBottom:8}}>No hay planificación para hoy</p>
+        <p style={{color:'var(--texto2)',fontSize:14}}>Andá a Planificación, cargá lo que vas a producir hoy y guardá. Los productos aparecerán acá.</p>
+      </div>
+    </div>
+  );
+
+  if (productosDelDia.length === 0) return (
+    <div style={{paddingBottom:80}}>
+      <Header titulo="🧁 Productos" />
+      <div style={{textAlign:'center',padding:'60px 24px'}}>
+        <div style={{fontSize:48,marginBottom:12}}>💰</div>
+        <p style={{fontWeight:600,color:'var(--texto)',marginBottom:8}}>Falta definir los precios</p>
+        <p style={{color:'var(--texto2)',fontSize:14}}>En Planificación tocá el botón 💰 de cada producto para cargar los precios de venta.</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{paddingBottom:80}}>
+      <Header titulo="🧁 Productos del día" />
+      <div style={{display:'flex',flexDirection:'column',gap:0}}>
+
+        {/* Lista productos */}
+        <div style={{padding:'12px 16px',display:'flex',flexDirection:'column',gap:10}}>
+          {productosDelDia.map(item => (
+            <div key={item.recetaId} className="card-base" style={{padding:'10px 12px',marginBottom:0}}>
+              <div style={{fontWeight:600,fontSize:15,marginBottom:8,color:'var(--texto)'}}>{item.recetaEmoji} {item.recetaNombre}</div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                {item.opciones.filter(o=>o.precio>0).map(op => (
+                  <div key={op.id} style={{flex:'1 1 130px',background:'var(--crema)',border:'1px solid var(--beige)',borderRadius:10,padding:'8px 10px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <div>
+                      <div style={{fontSize:11,color:'var(--texto2)'}}>{op.label}</div>
+                      <div style={{fontSize:14,fontWeight:700,color:'var(--chocolate)'}}>${op.precio.toLocaleString('es-AR')}</div>
+                    </div>
+                    <button onClick={()=>agregar(item,op)} style={{width:30,height:30,borderRadius:'50%',background:'var(--caramelo)',color:'white',border:'none',fontSize:20,cursor:'pointer',lineHeight:1,display:'flex',alignItems:'center',justifyContent:'center'}}>+</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Carrito */}
+        <div style={{margin:'0 16px 16px',background:'var(--superficie)',border:'1px solid var(--beige)',borderRadius:14,padding:14}}>
+          <p style={{fontSize:12,fontWeight:700,color:'var(--texto2)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:10}}>🛒 Carrito</p>
+
+          {carrito.length===0
+            ? <p style={{color:'var(--texto2)',fontSize:13,textAlign:'center',padding:'8px 0'}}>Agregá productos para armar la venta</p>
+            : <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:12}}>
+                {carrito.map(i=>(
+                  <div key={i.key} style={{display:'flex',alignItems:'center',justifyContent:'space-between',background:'var(--crema)',borderRadius:8,padding:'7px 10px'}}>
+                    <div style={{minWidth:0,flex:1}}>
+                      <div style={{fontSize:13,fontWeight:500,color:'var(--texto)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{i.emoji} {i.nombre} · {i.opLabel}</div>
+                      <div style={{fontSize:11,color:'var(--texto2)'}}>${i.precio.toLocaleString('es-AR')} c/u</div>
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',gap:5,flexShrink:0}}>
+                      <button onClick={()=>cambiar(i.key,-1)} style={{width:22,height:22,borderRadius:'50%',border:'1px solid var(--beige2)',background:'none',cursor:'pointer',color:'var(--texto)',fontSize:14}}>-</button>
+                      <span style={{fontSize:14,fontWeight:700,color:'var(--texto)',minWidth:20,textAlign:'center'}}>{i.cantidad}</span>
+                      <button onClick={()=>cambiar(i.key,+1)} style={{width:22,height:22,borderRadius:'50%',border:'1px solid var(--beige2)',background:'none',cursor:'pointer',color:'var(--texto)',fontSize:14}}>+</button>
+                      <span style={{fontSize:13,fontWeight:600,color:'var(--chocolate)',minWidth:56,textAlign:'right'}}>${(i.precio*i.cantidad).toLocaleString('es-AR')}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+          }
+
+          {/* Pago */}
+          <p style={{fontSize:11,fontWeight:700,color:'var(--texto2)',textTransform:'uppercase',marginBottom:6}}>Forma de pago</p>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginBottom:10}}>
+            {PAGOS.map(([k,l])=>(
+              <button key={k} onClick={()=>setPago(k)} style={{padding:'7px 4px',borderRadius:8,fontSize:12,fontWeight:pago===k?700:400,border:pago===k?'2px solid var(--caramelo)':'1px solid var(--beige)',background:pago===k?'var(--beige)':'none',color:'var(--texto)',cursor:'pointer'}}>{l}</button>
+            ))}
+          </div>
+
+          {/* Entrega */}
+          <p style={{fontSize:11,fontWeight:700,color:'var(--texto2)',textTransform:'uppercase',marginBottom:6}}>Entrega</p>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginBottom:12}}>
+            {ENTREGAS.map(([k,l])=>(
+              <button key={k} onClick={()=>setEntrega(k)} style={{padding:'7px 4px',borderRadius:8,fontSize:12,fontWeight:entrega===k?700:400,border:entrega===k?'2px solid var(--caramelo)':'1px solid var(--beige)',background:entrega===k?'var(--beige)':'none',color:'var(--texto)',cursor:'pointer'}}>{l}</button>
+            ))}
+          </div>
+
+          {/* Total */}
+          <div style={{borderTop:'1px solid var(--beige)',paddingTop:10}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+              <span style={{fontSize:15,fontWeight:700,color:'var(--texto)'}}>Total</span>
+              <span style={{fontSize:20,fontWeight:700,color:'var(--chocolate)'}}>${total.toLocaleString('es-AR')}</span>
+            </div>
+            {confirmado && <div style={{background:'#d4edda',color:'#155724',borderRadius:8,padding:'8px',textAlign:'center',fontSize:13,marginBottom:8}}>✅ Venta confirmada</div>}
+            <button onClick={confirmar} disabled={!carrito.length} style={{...S.btnPrimario,width:'100%',opacity:carrito.length?1:0.5}}>✓ Confirmar venta</button>
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 }
@@ -2556,7 +2520,7 @@ function App() {
   const ingBase = ING_DEFAULT_RC;
   const recBase = REC_DEFAULT_RC;
   const pantallas = {
-    productos:     <PantallaProductos    uid={user.uid} ingBase={ingBase} recBase={recBase} />,
+    productos:     <PantallaProductos    uid={user.uid} />,
     pedidos:       <PantallaPedidos      uid={user.uid} />,
     recetas:       <PantallaRecetas      uid={user.uid} />,
     planificacion: <PantallaPlanificacion uid={user.uid} ingBase={ingBase} recBase={recBase} />,
