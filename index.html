@@ -2482,21 +2482,65 @@ function ModalOpciones({ item, ingBase, recBase, onGuardar, onCancelar }) {
   const calcPrecio = (unidades, margen) =>
     (unidades && costoReceta) ? Math.round((costoReceta/unidades)*(1+margen/100)) : 0;
 
-  // Generar opciones automáticas según tipo
+  // Generar opciones automáticas según tipo — SIEMPRE desde la receta
+  // (ignora opciones guardadas si existen, para forzar recálculo correcto)
   const opcionesDefault = React.useMemo(() => {
-    if (item.opciones && item.opciones.length>0) return item.opciones;
     if (tipo.modo==='porcionable') {
+      // Torta/Tarta: Entera + Por porción
       return [
-        { id:'o1', label:'Entera', unidades:1, margen:margenSug, precio:calcPrecio(1,margenSug), precioManual:false },
-        { id:'o2', label:'Por porción', unidades:rindeNum, margen:margenSug, precio:calcPrecio(rindeNum,margenSug), precioManual:false },
+        {
+          id:'o1', label:'Entera',
+          unidades:1,        // 1 batch = 1 torta entera
+          margen:margenSug,
+          precio: calcPrecio(1, margenSug),  // costo completo + margen
+          precioManual:false
+        },
+        {
+          id:'o2', label:'Por porción ('+rindeNum+' c/torta)',
+          unidades:rindeNum, // 1 batch = 8 porciones
+          margen:margenSug,
+          precio: calcPrecio(rindeNum, margenSug), // costo ÷ porciones + margen
+          precioManual:false
+        },
       ];
     }
+    // Individual: Por docena (batch completo) + Por unidad (1 pieza)
+    const labelDocena = rindeNum===12 ? 'Por docena ('+rindeNum+' u.)' : 'Por lote ('+rindeNum+' u.)';
     return [
-      { id:'o1', label:'Por unidad', unidades:rindeNum, margen:margenSug, precio:calcPrecio(rindeNum,margenSug), precioManual:false },
+      {
+        id:'o1', label: labelDocena,
+        unidades:1,        // 1 batch completo
+        margen:margenSug,
+        precio: calcPrecio(1, margenSug),  // costo completo + margen
+        precioManual:false
+      },
+      {
+        id:'o2', label:'Por unidad (1 pieza)',
+        unidades:rindeNum, // precio de 1 pieza del batch
+        margen:margenSug,
+        precio: calcPrecio(rindeNum, margenSug), // costo ÷ unidades + margen
+        precioManual:false
+      },
     ];
+  },[tipo.id, rindeNum, margenSug, costoReceta]);
+
+  // Si ya tenía opciones guardadas con precios, usarlas como base pero recalcular
+  const opcionesIniciales = React.useMemo(() => {
+    const saved = item.opciones || [];
+    if (saved.length === 0) return opcionesDefault;
+    // Verificar si las opciones guardadas tienen el tipo correcto
+    const tieneEntera   = saved.some(o=>o.label==='Entera');
+    const tienePorcion  = saved.some(o=>o.label?.includes('porción'));
+    const tieneDocena   = saved.some(o=>o.label?.includes('docena')||o.label?.includes('lote'));
+    const tieneUnidad   = saved.some(o=>o.label?.includes('unidad'));
+    // Si el tipo es porcionable pero no tiene ambas → regenerar
+    if (tipo.modo==='porcionable' && (!tieneEntera || !tienePorcion)) return opcionesDefault;
+    // Si el tipo es individual pero no tiene ambas → regenerar  
+    if (tipo.modo==='individual' && (!tieneDocena || !tieneUnidad)) return opcionesDefault;
+    return saved;
   },[]);
 
-  const [opciones, setOpciones] = useState(opcionesDefault);
+  const [opciones, setOpciones] = useState(opcionesIniciales);
 
   const editar = (id,k,v) => setOpciones(prev=>prev.map(o=>{
     if(o.id!==id) return o;
@@ -2529,9 +2573,15 @@ function ModalOpciones({ item, ingBase, recBase, onGuardar, onCancelar }) {
             <span style={{fontSize:13,color:'var(--texto)'}}>Costo materia prima (1 batch)</span>
             <span style={{fontSize:16,fontWeight:700,color:'var(--chocolate)'}}>${costoReceta.toLocaleString('es-AR')}</span>
           </div>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <span style={{fontSize:12,color:'var(--texto2)'}}>{tipo.label} · {rindeNum} {tipo.modo==='porcionable'?'porciones':'unidades'}</span>
-            <span style={{fontSize:11,color:'var(--verde)',fontWeight:600}}>Margen sugerido: {margenSug}%</span>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2}}>
+            <span style={{fontSize:12,color:'var(--texto2)'}}>{tipo.label} · rinde {rindeNum} {tipo.modo==='porcionable'?'porciones':'unidades'}</span>
+            <span style={{fontSize:11,color:'var(--verde)',fontWeight:600}}>Margen: {margenSug}%</span>
+          </div>
+          <div style={{fontSize:11,color:'var(--chocolate)',fontWeight:600,marginTop:2}}>
+            {tipo.modo==='porcionable'
+              ? `Entera: $${calcPrecio(1,margenSug).toLocaleString('es-AR')} · Porción: $${calcPrecio(rindeNum,margenSug).toLocaleString('es-AR')}`
+              : `Por lote: $${calcPrecio(1,margenSug).toLocaleString('es-AR')} · Por unidad: $${calcPrecio(rindeNum,margenSug).toLocaleString('es-AR')}`
+            }
           </div>
           {costoReceta===0&&<p style={{fontSize:11,color:'var(--naranja)',marginTop:4}}>⚠️ Sin costo — cargá los precios en Stock</p>}
         </div>
