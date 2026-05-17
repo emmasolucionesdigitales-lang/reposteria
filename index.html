@@ -2245,11 +2245,11 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
   }, [uid]);
 
   // ── Helpers ────────────────────────────────────────────────────────
-  const getItem = (recId) => planItems.find(i=>i.recetaId===recId);
+  const getItem = (recId) => formItems.find(i=>i.recetaId===recId);
 
   const setCantidad = (rec, cant) => {
     cant = Math.max(0, cant);
-    setPlanItems(prev => {
+    setFormItems(prev => {
       const existe = prev.find(i=>i.recetaId===rec.id);
       if (existe) {
         if (cant === 0) return prev.filter(i=>i.recetaId!==rec.id);
@@ -2265,14 +2265,14 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
   };
 
   const guardarOpciones = (recId, opciones) => {
-    setPlanItems(prev => prev.map(i=>i.recetaId===recId ? {...i, opciones} : i));
+    setFormItems(prev => prev.map(i=>i.recetaId===recId ? {...i, opciones} : i));
     setEditOpciones(null);
   };
 
   // ── Calcular ingredientes totales ──────────────────────────────────
   const calcIngredientes = () => {
     const tot = {};
-    for (const item of planItems) {
+    for (const item of formItems) {
       const rec = (recBase||[]).find(r=>r.id===item.recetaId);
       if (!rec) continue;
       for (const ri of (rec.ingredientes||[])) {
@@ -2295,7 +2295,7 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
 
   const guardar = async () => {
     // 1. Verificar precios en todos los items
-    const falta = planItems.find(i => !i.opciones || !i.opciones.some(o=>Number(o.precio)>0));
+    const falta = formItems.find(i => !i.opciones || !i.opciones.some(o=>Number(o.precio)>0));
     if (falta) {
       setSinPrecio(falta.recetaId);
       setEditOpciones(falta.recetaId); // abrir modal de precios
@@ -2305,10 +2305,10 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
 
     // 2. Acumular con producción existente del día
     const snap = await db.collection(`reposteria/${uid}/planificacion`).doc(hoy()).get();
-    const existentes = snap.exists ? (snap.data().items||[]) : [];
+    const existentes = savedItems; // ya los tenemos en memoria
 
     const acumulado = [...existentes];
-    for (const nuevo of planItems) {
+    for (const nuevo of formItems) {
       const idx = acumulado.findIndex(e=>e.recetaId===nuevo.recetaId);
       if (idx >= 0) {
         // Sumar cantidad y conservar opciones más recientes
@@ -2318,23 +2318,38 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
       }
     }
 
-    // 3. Guardar acumulado
+    // 3. Calcular disponible de cada item (cantidad × rinde_num de la receta)
+    const acumuladoConDisp = acumulado.map(item => {
+      const rec = (recBase||[]).find(r=>r.id===item.recetaId);
+      const rindeNum = rec?.rinde_num || getTipo(rec?.tipo||'delicia').porcionesDefault;
+      // disponible en unidades base (porciones o piezas individuales)
+      const dispBase = (item.cantidad||1) * rindeNum;
+      return {
+        ...item,
+        rindeNum,
+        disponible: item.disponible !== undefined
+          ? item.disponible + ((item.cantidad||1) * rindeNum - (existentes.find(e=>e.recetaId===item.recetaId)?.cantidad||0) * rindeNum)
+          : dispBase
+      };
+    });
+
+    // 4. Guardar acumulado con disponible
     await db.collection(`reposteria/${uid}/planificacion`).doc(hoy())
-      .set({ fecha: hoy(), items: acumulado });
+      .set({ fecha: hoy(), items: acumuladoConDisp });
 
     // 4. Limpiar el formulario para una nueva producción
-    setPlanItems([]);
+    setFormItems([]);  // limpiar SOLO el formulario, savedItems se actualiza solo por onSnapshot
     setGuardado(true);
     setTimeout(() => setGuardado(false), 4000);
   };
 
   // ── Modal opciones de venta ────────────────────────────────────────
   if (editOpciones !== null) {
-    const item = planItems.find(i=>i.recetaId===editOpciones);
+    const item = formItems.find(i=>i.recetaId===editOpciones);
     return <ModalOpciones item={item} ingBase={ingBase} recBase={recBase} onGuardar={ops=>guardarOpciones(editOpciones,ops)} onCancelar={()=>setEditOpciones(null)} />;
   }
 
-  const hayPlan = planItems.length > 0;
+  const hayPlan = formItems.length > 0;
   // Factor de conversión: receta usa unidad base (g/ml/unidades)
   // stock usa unidad de compra (kg/litro/docena/unidad)
   const CONV = { kg:1000, litro:1000, docena:12, unidad:1 };
@@ -2352,7 +2367,12 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
       <div style={{ padding:'12px 16px' }}>
 
         {/* ── Planilla de producción ── */}
-        <p style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:10 }}>¿Qué vas a producir hoy?</p>
+        {savedItems.length > 0 && (
+          <div style={{ background:'rgba(39,174,96,0.08)', border:'1px solid rgba(39,174,96,0.2)', borderRadius:10, padding:'9px 14px', marginBottom:12, fontSize:12, color:'var(--verde)', fontWeight:600 }}>
+            ✅ Ya guardado hoy: {savedItems.map(i=>i.recetaNombre).join(', ')}
+          </div>
+        )}
+        <p style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:10 }}>¿Qué más vas a producir?</p>
 
         <div style={{ background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:14, overflow:'hidden', marginBottom:16 }}>
           {/* Header tabla */}
@@ -2490,16 +2510,16 @@ function ModalOpciones({ item, ingBase, recBase, onGuardar, onCancelar }) {
       return [
         {
           id:'o1', label:'Entera',
-          unidades:1,        // 1 batch = 1 torta entera
-          margen:margenSug,
-          precio: calcPrecio(1, margenSug),  // costo completo + margen
+          unidades:1, margen:margenSug,
+          precio: calcPrecio(1, margenSug),
+          deduccion: rindeNum, // vender 1 entera descuenta rindeNum porciones
           precioManual:false
         },
         {
           id:'o2', label:'Por porción ('+rindeNum+' c/torta)',
-          unidades:rindeNum, // 1 batch = 8 porciones
-          margen:margenSug,
-          precio: calcPrecio(rindeNum, margenSug), // costo ÷ porciones + margen
+          unidades:rindeNum, margen:margenSug,
+          precio: calcPrecio(rindeNum, margenSug),
+          deduccion: 1, // vender 1 porción descuenta 1 unidad
           precioManual:false
         },
       ];
@@ -2509,16 +2529,16 @@ function ModalOpciones({ item, ingBase, recBase, onGuardar, onCancelar }) {
     return [
       {
         id:'o1', label: labelDocena,
-        unidades:1,        // 1 batch completo
-        margen:margenSug,
-        precio: calcPrecio(1, margenSug),  // costo completo + margen
+        unidades:1, margen:margenSug,
+        precio: calcPrecio(1, margenSug),
+        deduccion: rindeNum, // vender 1 docena descuenta rindeNum unidades
         precioManual:false
       },
       {
         id:'o2', label:'Por unidad (1 pieza)',
-        unidades:rindeNum, // precio de 1 pieza del batch
-        margen:margenSug,
-        precio: calcPrecio(rindeNum, margenSug), // costo ÷ unidades + margen
+        unidades:rindeNum, margen:margenSug,
+        precio: calcPrecio(rindeNum, margenSug),
+        deduccion: 1, // vender 1 pieza descuenta 1 unidad
         precioManual:false
       },
     ];
@@ -2659,33 +2679,121 @@ function PantallaProductos({ uid }) {
       .onSnapshot(snap => setPlanItems(snap.exists ? (snap.data().items||[]) : []));
   }, [uid]);
 
-  const productosDelDia = (planItems||[]).filter(i => i.opciones && i.opciones.some(o=>o.precio>0));
+  const productosDelDia = (planItems||[]).filter(i => i.opciones && i.opciones.some(o=>Number(o.precio)>0));
+
+  // Disponible real = disponible en Firebase − lo que está en el carrito aún no confirmado
+  const getDisponible = (recetaId) => {
+    const item = (planItems||[]).find(i=>i.recetaId===recetaId);
+    if (!item) return 0;
+    const base = item.disponible ?? 0;
+    // Restar lo que ya está en el carrito
+    const enCarrito = carrito.filter(c=>c.recetaId===recetaId)
+      .reduce((s,c)=>s+c.deduccion*c.cantidad,0);
+    return Math.max(0, base - enCarrito);
+  };
 
   const agregar = (item, op) => {
+    const disp = getDisponible(item.recetaId);
+    const deduccion = op.deduccion || 1;
+    if (disp < deduccion) return; // no hay suficiente
     const key = `${item.recetaId}_${op.id}`;
     setCarrito(prev => {
       const e = prev.find(i=>i.key===key);
       if (e) return prev.map(i=>i.key===key?{...i,cantidad:i.cantidad+1}:i);
-      return [...prev, { key, emoji:item.recetaEmoji, nombre:item.recetaNombre, opLabel:op.label, precio:op.precio, cantidad:1 }];
+      return [...prev, {
+        key, recetaId:item.recetaId,
+        emoji:item.recetaEmoji, nombre:item.recetaNombre,
+        opLabel:op.label, precio:op.precio,
+        deduccion, cantidad:1
+      }];
     });
   };
 
   const cambiar = (key, delta) => {
-    setCarrito(prev => prev.map(i=>i.key===key?{...i,cantidad:Math.max(0,i.cantidad+delta)}:i).filter(i=>i.cantidad>0));
+    setCarrito(prev => {
+      if (delta > 0) {
+        // Verificar disponible antes de agregar
+        const item = prev.find(i=>i.key===key);
+        if (item) {
+          const disp = getDisponible(item.recetaId);
+          if (disp < item.deduccion) return prev;
+        }
+      }
+      return prev.map(i=>i.key===key?{...i,cantidad:Math.max(0,i.cantidad+delta)}:i).filter(i=>i.cantidad>0);
+    });
   };
 
   const total = carrito.reduce((s,i)=>s+i.precio*i.cantidad, 0);
 
+  const liquidarSobrantes = async () => {
+    const itemsConSobrante = (planItems||[]).filter(i=>(i.disponible||0)>0);
+    if (!itemsConSobrante.length) { alert('No hay sobrantes para liquidar.'); return; }
+
+    // Calcular pérdida por sobrantes
+    let perdidaTotal = 0;
+    const detalle = itemsConSobrante.map(item => {
+      // Buscar la opción "Por unidad" para calcular el costo unitario
+      const costoUnitario = item.opciones?.[0]?.precio
+        ? item.opciones[0].precio / (1 + (item.opciones[0].margen||50)/100) // extraer costo del precio
+        : 0;
+      const perdida = Math.round(costoUnitario * (item.disponible||0));
+      perdidaTotal += perdida;
+      return `${item.recetaEmoji||'🍰'} ${item.recetaNombre}: ${item.disponible} u. → $${perdida.toLocaleString('es-AR')}`;
+    });
+
+    const msg = `Sobrantes del día:
+
+${detalle.join('
+')}
+
+Pérdida total estimada: $${perdidaTotal.toLocaleString('es-AR')}
+
+¿Confirmar y cerrar la producción de hoy?`;
+    if (!confirm(msg)) return;
+
+    // Guardar la pérdida como un registro en pedidos (tipo: 'perdida')
+    await db.collection(\`reposteria/\${uid}/pedidos\`).add({
+      fecha: hoy(),
+      tipo: 'perdida',
+      hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+      items: itemsConSobrante.map(i=>({ nombre: i.recetaEmoji+' '+i.recetaNombre, cantidad: i.disponible, subtotal: 0 })),
+      total: -perdidaTotal,
+      perdida: perdidaTotal,
+      confirmado: true,
+    });
+
+    // Poner disponible en 0 para todos
+    const snap = await db.collection(\`reposteria/\${uid}/planificacion\`).doc(hoy()).get();
+    if (snap.exists) {
+      const items = snap.data().items.map(i=>({...i, disponible:0, cerrado:true}));
+      await db.collection(\`reposteria/\${uid}/planificacion\`).doc(hoy()).update({ items, cerrado:true });
+    }
+    alert('✅ Producción del día cerrada. Pérdida registrada en el Resumen.');
+  };
+
   const confirmar = async () => {
     if (!carrito.length) return;
+    // Guardar pedido
     await db.collection(`reposteria/${uid}/pedidos`).add({
       fecha: hoy(),
       hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
       tipo: 'mostrador',
       items: carrito.map(i=>({ nombre:`${i.emoji} ${i.nombre}`, opcion:i.opLabel, precio:i.precio, cantidad:i.cantidad, subtotal:i.precio*i.cantidad })),
       total, pago, entrega,
-      confirmado: pago !== 'transferencia', // transferencias arrancan como pendientes
+      confirmado: pago !== 'transferencia',
     });
+    // Descontar disponible en planificación
+    const snap = await db.collection(`reposteria/${uid}/planificacion`).doc(hoy()).get();
+    if (snap.exists) {
+      const items = snap.data().items || [];
+      const actualizados = items.map(item => {
+        const vendido = carrito.filter(c=>c.recetaId===item.recetaId)
+          .reduce((s,c)=>s+c.deduccion*c.cantidad,0);
+        if (!vendido) return item;
+        return {...item, disponible: Math.max(0,(item.disponible||0)-vendido)};
+      });
+      await db.collection(`reposteria/${uid}/planificacion`).doc(hoy()).update({ items: actualizados });
+    }
     setCarrito([]);
     setConfirmado(true);
     setTimeout(()=>setConfirmado(false), 3000);
@@ -2727,17 +2835,35 @@ function PantallaProductos({ uid }) {
         <div style={{padding:'12px 16px',display:'flex',flexDirection:'column',gap:10}}>
           {productosDelDia.map(item => (
             <div key={item.recetaId} className="card-base" style={{padding:'10px 12px',marginBottom:0}}>
-              <div style={{fontWeight:600,fontSize:15,marginBottom:8,color:'var(--texto)'}}>{item.recetaEmoji} {item.recetaNombre}</div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+                <div style={{fontWeight:600,fontSize:15,color:'var(--texto)'}}>{item.recetaEmoji} {item.recetaNombre}</div>
+                <div style={{flexShrink:0,marginLeft:8}}>
+                  {(()=>{
+                    const disp=getDisponible(item.recetaId);
+                    const esPorcionable=item.opciones?.some(o=>o.label?.includes('porción')||o.label==='Entera');
+                    const unidLabel=esPorcionable?'porc.':'u.';
+                    return <span style={{fontSize:12,fontWeight:700,color:disp===0?'var(--rojo)':disp<=(item.rindeNum||1)?'var(--naranja)':'var(--verde)'}}>
+                      {disp===0?'⛔ Agotado':disp+' '+unidLabel+' disp.'}
+                    </span>;
+                  })()}
+                </div>
+              </div>
               <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                {item.opciones.filter(o=>o.precio>0).map(op => (
-                  <div key={op.id} style={{flex:'1 1 130px',background:'var(--crema)',border:'1px solid var(--beige)',borderRadius:10,padding:'8px 10px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                    <div>
-                      <div style={{fontSize:11,color:'var(--texto2)'}}>{op.label}</div>
-                      <div style={{fontSize:14,fontWeight:700,color:'var(--chocolate)'}}>${op.precio.toLocaleString('es-AR')}</div>
+                {item.opciones.filter(o=>Number(o.precio)>0).map(op => {
+                  const deduccion=op.deduccion||1;
+                  const disp=getDisponible(item.recetaId);
+                  const sinStock=disp<deduccion;
+                  return (
+                    <div key={op.id} style={{flex:'1 1 130px',background:sinStock?'rgba(192,57,43,0.05)':'var(--crema)',border:`1px solid ${sinStock?'rgba(192,57,43,0.2)':'var(--beige)'}`,borderRadius:10,padding:'8px 10px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <div>
+                        <div style={{fontSize:11,color:'var(--texto2)'}}>{op.label}</div>
+                        <div style={{fontSize:14,fontWeight:700,color:sinStock?'var(--rojo)':'var(--chocolate)'}}>${op.precio.toLocaleString('es-AR')}</div>
+                      </div>
+                      <button onClick={()=>agregar(item,op)} disabled={sinStock}
+                        style={{width:30,height:30,borderRadius:'50%',background:sinStock?'var(--beige)':'var(--caramelo)',color:sinStock?'var(--texto2)':'white',border:'none',fontSize:20,cursor:sinStock?'not-allowed':'pointer',lineHeight:1,display:'flex',alignItems:'center',justifyContent:'center',opacity:sinStock?0.5:1}}>+</button>
                     </div>
-                    <button onClick={()=>agregar(item,op)} style={{width:30,height:30,borderRadius:'50%',background:'var(--caramelo)',color:'white',border:'none',fontSize:20,cursor:'pointer',lineHeight:1,display:'flex',alignItems:'center',justifyContent:'center'}}>+</button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -2791,6 +2917,7 @@ function PantallaProductos({ uid }) {
             </div>
             {confirmado && <div style={{background:'#d4edda',color:'#155724',borderRadius:8,padding:'8px',textAlign:'center',fontSize:13,marginBottom:8}}>✅ Venta confirmada</div>}
             <button onClick={confirmar} disabled={!carrito.length} style={{...S.btnPrimario,width:'100%',opacity:carrito.length?1:0.5}}>✓ Confirmar venta</button>
+            <button onClick={liquidarSobrantes} style={{...S.btn,width:'100%',marginTop:8,color:'var(--rojo)',fontSize:12}}>⚠️ Liquidar sobrantes del día</button>
           </div>
         </div>
 
@@ -2837,7 +2964,10 @@ function PantallaResumen({ uid, ingBase, recBase }) {
   const pedidosFiltrados = pedidos.filter(filtrar);
 
   // ── Calcular totales de ventas ─────────────────────────────────────
-  const totalVentas    = pedidosFiltrados.reduce((s,p)=>s+(Number(p.total)||0),0);
+  const pedidosVenta   = pedidosFiltrados.filter(p=>p.tipo!=='perdida');
+  const pedidosPerdida = pedidosFiltrados.filter(p=>p.tipo==='perdida');
+  const totalVentas    = pedidosVenta.reduce((s,p)=>s+(Number(p.total)||0),0);
+  const totalPerdidas  = pedidosPerdida.reduce((s,p)=>s+(Number(p.perdida)||0),0);
   const porPago = { efectivo:0, transferencia:0, debito:0, credito:0 };
   const transferenciasPend = [];
   pedidosFiltrados.forEach(p => {
@@ -2947,9 +3077,16 @@ function PantallaResumen({ uid, ingBase, recBase }) {
               )}
               <div style={{background:'var(--superficie)',border:'1px solid var(--beige)',borderRadius:12,padding:'12px 14px'}}>
                 <div style={{fontSize:11,color:'var(--texto2)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:4}}>Ticket promedio</div>
-                <div style={{fontSize:22,fontWeight:700,color:'var(--chocolate)'}}>{fmt(pedidosFiltrados.length?totalVentas/pedidosFiltrados.length:0)}</div>
+                <div style={{fontSize:22,fontWeight:700,color:'var(--chocolate)'}}>{fmt(pedidosVenta.length?totalVentas/pedidosVenta.length:0)}</div>
                 <div style={{fontSize:11,color:'var(--texto2)',marginTop:2}}>por pedido</div>
               </div>
+              {totalPerdidas > 0 && (
+                <div style={{background:'rgba(192,57,43,0.06)',border:'1px solid rgba(192,57,43,0.2)',borderRadius:12,padding:'12px 14px',gridColumn:'span 2'}}>
+                  <div style={{fontSize:11,color:'var(--rojo)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:4}}>⚠️ Pérdidas por sobrantes</div>
+                  <div style={{fontSize:22,fontWeight:700,color:'var(--rojo)'}}>{fmt(totalPerdidas)}</div>
+                  <div style={{fontSize:11,color:'var(--rojo)',marginTop:2}}>productos no vendidos</div>
+                </div>
+              )}
             </div>
 
             {/* ── Formas de pago ── */}
