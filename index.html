@@ -2729,46 +2729,35 @@ function PantallaProductos({ uid }) {
     const itemsConSobrante = (planItems||[]).filter(i=>(i.disponible||0)>0);
     if (!itemsConSobrante.length) { alert('No hay sobrantes para liquidar.'); return; }
 
-    // Calcular pérdida por sobrantes
     let perdidaTotal = 0;
     const detalle = itemsConSobrante.map(item => {
-      // Buscar la opción "Por unidad" para calcular el costo unitario
-      const costoUnitario = item.opciones?.[0]?.precio
-        ? item.opciones[0].precio / (1 + (item.opciones[0].margen||50)/100) // extraer costo del precio
+      const costoUnitario = item.opciones && item.opciones[0] && item.opciones[0].precio
+        ? item.opciones[0].precio / (1 + (item.opciones[0].margen||50)/100)
         : 0;
       const perdida = Math.round(costoUnitario * (item.disponible||0));
       perdidaTotal += perdida;
-      return `${item.recetaEmoji||'🍰'} ${item.recetaNombre}: ${item.disponible} u. → $${perdida.toLocaleString('es-AR')}`;
+      return (item.recetaEmoji||'🍰') + ' ' + item.recetaNombre + ': ' + item.disponible + ' u. → $' + perdida.toLocaleString('es-AR');
     });
 
-    const msg = `Sobrantes del día:
-
-${detalle.join('
-')}
-
-Pérdida total estimada: $${perdidaTotal.toLocaleString('es-AR')}
-
-¿Confirmar y cerrar la producción de hoy?`;
+    const msg = 'Sobrantes del día:\n\n' + detalle.join('\n') + '\n\nPérdida total: $' + perdidaTotal.toLocaleString('es-AR') + '\n\n¿Confirmar y cerrar la producción de hoy?';
     if (!confirm(msg)) return;
 
-    // Guardar la pérdida como un registro en pedidos (tipo: 'perdida')
-    await db.collection(\`reposteria/\${uid}/pedidos\`).add({
+    await db.collection('reposteria/' + uid + '/pedidos').add({
       fecha: hoy(),
       tipo: 'perdida',
       hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
-      items: itemsConSobrante.map(i=>({ nombre: i.recetaEmoji+' '+i.recetaNombre, cantidad: i.disponible, subtotal: 0 })),
+      items: itemsConSobrante.map(i=>({ nombre: (i.recetaEmoji||'') + ' ' + i.recetaNombre, cantidad: i.disponible, subtotal: 0 })),
       total: -perdidaTotal,
       perdida: perdidaTotal,
       confirmado: true,
     });
 
-    // Poner disponible en 0 para todos
-    const snap = await db.collection(\`reposteria/\${uid}/planificacion\`).doc(hoy()).get();
+    const snap = await db.collection('reposteria/' + uid + '/planificacion').doc(hoy()).get();
     if (snap.exists) {
       const items = snap.data().items.map(i=>({...i, disponible:0, cerrado:true}));
-      await db.collection(\`reposteria/\${uid}/planificacion\`).doc(hoy()).update({ items, cerrado:true });
+      await db.collection('reposteria/' + uid + '/planificacion').doc(hoy()).update({ items, cerrado:true });
     }
-    alert('✅ Producción del día cerrada. Pérdida registrada en el Resumen.');
+    alert('Producción del día cerrada. Pérdida registrada en el Resumen.');
   };
 
   const confirmar = async () => {
