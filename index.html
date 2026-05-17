@@ -213,6 +213,42 @@ function Campo({ label, value, onChange, placeholder, tipo = 'text', rows, child
 // COMPONENTE: HEADER
 // ══════════════════════════════════════════════════════
 
+
+// ── TEMAS DE COLORES ─────────────────────────────────────────────────
+const TEMAS_DG = {
+  chocolate: { nombre:'🍫 Chocolate', chocolate:'#2C1206', cacao:'#5C2E14', caramelo:'#A0622A', dorado:'#C9963C', crema:'#FBF5E6', beige:'#EDD9B0', superficie:'#FFFCF4', texto:'#1E0E04', texto2:'#6B4530' },
+  rosa:      { nombre:'🌸 Rosa',       chocolate:'#831843', cacao:'#9D174D', caramelo:'#DB2777', dorado:'#F472B6', crema:'#FFF1F8', beige:'#FECDD3', superficie:'#FFF8FB', texto:'#500724', texto2:'#9D174D' },
+  violeta:   { nombre:'💜 Violeta',    chocolate:'#3B0764', cacao:'#4C1D95', caramelo:'#7C3AED', dorado:'#A78BFA', crema:'#F5F3FF', beige:'#DDD6FE', superficie:'#FDFCFF', texto:'#1E0B3B', texto2:'#5B21B6' },
+  menta:     { nombre:'🌿 Menta',      chocolate:'#064E3B', cacao:'#065F46', caramelo:'#059669', dorado:'#34D399', crema:'#ECFDF5', beige:'#A7F3D0', superficie:'#F0FDF9', texto:'#022C22', texto2:'#065F46' },
+  fresa:     { nombre:'🍓 Fresa',      chocolate:'#7F1D1D', cacao:'#991B1B', caramelo:'#DC2626', dorado:'#F87171', crema:'#FEF2F2', beige:'#FECACA', superficie:'#FFF8F8', texto:'#450A0A', texto2:'#991B1B' },
+  vainilla:  { nombre:'🍦 Vainilla',   chocolate:'#78350F', cacao:'#92400E', caramelo:'#D97706', dorado:'#FCD34D', crema:'#FFFBEB', beige:'#FDE68A', superficie:'#FFFFFF', texto:'#1C1917', texto2:'#78350F' },
+  noche:     { nombre:'🌙 Noche',      chocolate:'#0F172A', cacao:'#1E293B', caramelo:'#6366F1', dorado:'#818CF8', crema:'#F1F5F9', beige:'#334155', superficie:'#1E293B', texto:'#F8FAFC', texto2:'#94A3B8' },
+};
+
+function aplicarTema(id) {
+  const t = TEMAS_DG[id] || TEMAS_DG.chocolate;
+  const r = document.documentElement.style;
+  r.setProperty('--chocolate',  t.chocolate);
+  r.setProperty('--cacao',      t.cacao);
+  r.setProperty('--caramelo',   t.caramelo);
+  r.setProperty('--dorado',     t.dorado);
+  r.setProperty('--crema',      t.crema);
+  r.setProperty('--beige',      t.beige);
+  r.setProperty('--beige2',     t.beige);
+  r.setProperty('--superficie', t.superficie);
+  r.setProperty('--texto',      t.texto);
+  r.setProperty('--texto2',     t.texto2);
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', t.chocolate);
+  localStorage.setItem('dg_tema', id);
+}
+
+// Aplicar tema guardado al cargar
+(()=>{ aplicarTema(localStorage.getItem('dg_tema')||'chocolate'); })();
+
+// Nombre del negocio
+const getNombreNegocio = () => localStorage.getItem('dg_nombre') || 'Mi Repostería';
+const setNombreNegocio = v => localStorage.setItem('dg_nombre', v);
+
 // ── FECHA Y HORA ─────────────────────────────────────────────────────
 const ahora = () => new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
 const fechaCorta = () => new Date().toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short'});
@@ -225,24 +261,25 @@ function Header({ titulo, onBack, onAdd, onLogout, subtitulo }) {
     return () => clearInterval(t);
   }, []);
 
+  const [nombre] = useState(getNombreNegocio);
   return (
     <header style={{
       background: 'var(--chocolate)', color: 'var(--crema)',
-      padding: '14px 16px 12px',
+      padding: '10px 16px',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       position: 'sticky', top: 0, zIndex: 50,
       boxShadow: '0 2px 12px rgba(44,18,6,0.3)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
         {onBack && (
           <button onClick={onBack}
-            style={{ background: 'none', border: 'none', color: 'var(--crema)', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>
+            style={{ background: 'none', border: 'none', color: 'var(--crema)', fontSize: 22, cursor: 'pointer', lineHeight: 1, flexShrink: 0 }}>
             ←
           </button>
         )}
-        <div>
-          <h2 style={{ fontFamily: 'Playfair Display', fontSize: 20, lineHeight: 1.1 }}>{titulo}</h2>
-          {subtitulo && <p style={{ fontSize: 11, opacity: 0.6, marginTop: 1 }}>{subtitulo}</p>}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontFamily: 'Playfair Display', fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nombre}</div>
+          <div style={{ fontSize: 11, opacity: 0.7, marginTop: 1 }}>{titulo}{subtitulo ? ' · ' + subtitulo : ''}</div>
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -267,6 +304,79 @@ function Header({ titulo, onBack, onAdd, onLogout, subtitulo }) {
   );
 }
 
+
+// ══════════════════════════════════════════════════════
+// PANTALLA: AJUSTES
+// ══════════════════════════════════════════════════════
+function PantallaAjustes({ onLogout }) {
+  const [nombre, setNombreState] = useState(getNombreNegocio());
+  const [temaActual, setTemaActual] = useState(()=>localStorage.getItem('dg_tema')||'chocolate');
+  const [editando, setEditando] = useState(false);
+  const [input, setInput] = useState(nombre);
+
+  const guardarNombre = () => {
+    setNombreNegocio(input.trim() || 'Mi Repostería');
+    setNombreState(input.trim() || 'Mi Repostería');
+    setEditando(false);
+  };
+
+  const elegirTema = (id) => {
+    aplicarTema(id);
+    setTemaActual(id);
+  };
+
+  return (
+    <div style={{ paddingBottom: 80 }}>
+      <Header titulo="⚙️ Ajustes" onLogout={onLogout} />
+      <div style={{ padding: '16px' }}>
+
+        {/* Nombre del negocio */}
+        <div className="card-base" style={{ marginBottom: 16 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--texto2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>Nombre del negocio</p>
+          {editando ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input value={input} onChange={e=>setInput(e.target.value)}
+                style={{ flex: 1, padding: '10px 12px', borderRadius: 10, border: '2px solid var(--caramelo)', background: 'var(--superficie)', color: 'var(--texto)', fontSize: 15 }}
+                autoFocus onKeyDown={e=>e.key==='Enter'&&guardarNombre()}
+              />
+              <button onClick={guardarNombre} style={{ padding: '10px 16px', borderRadius: 10, background: 'var(--caramelo)', color: 'white', border: 'none', fontWeight: 700, cursor: 'pointer' }}>✓</button>
+              <button onClick={()=>setEditando(false)} style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--beige)', color: 'var(--texto)', border: 'none', cursor: 'pointer' }}>✕</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 17, fontWeight: 600, color: 'var(--texto)', fontFamily: 'Playfair Display' }}>{nombre}</span>
+              <button onClick={()=>setEditando(true)} style={{ padding: '8px 14px', borderRadius: 10, background: 'var(--beige)', color: 'var(--texto2)', border: 'none', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>✏️ Editar</button>
+            </div>
+          )}
+        </div>
+
+        {/* Selector de temas */}
+        <div className="card-base">
+          <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--texto2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>Tema de colores</p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            {Object.entries(TEMAS_DG).map(([id, t]) => (
+              <button key={id} onClick={()=>elegirTema(id)}
+                style={{
+                  padding: '12px 10px', borderRadius: 12, cursor: 'pointer', textAlign: 'center',
+                  background: t.chocolate, color: t.crema,
+                  border: temaActual===id ? `3px solid ${t.dorado}` : '3px solid transparent',
+                  fontWeight: temaActual===id ? 700 : 500,
+                  fontSize: 13,
+                  boxShadow: temaActual===id ? `0 0 0 2px ${t.caramelo}` : 'none',
+                  transition: 'all 0.15s',
+                }}>
+                {t.nombre}
+                {temaActual===id && <div style={{ fontSize: 10, marginTop: 2, opacity: 0.8 }}>● Activo</div>}
+              </button>
+            ))}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════
 // COMPONENTE: NAV BAR (barra inferior)
 // ══════════════════════════════════════════════════════
@@ -277,6 +387,7 @@ const TABS = [
   { id: 'historial',   icon: '🧾', label: 'Historial'  },
   { id: 'presupuestos', icon: '💰', label: 'Precios'    },
   { id: 'recetas',      icon: '🍰', label: 'Recetas'    },
+  { id: 'ajustes',      icon: '⚙️', label: 'Ajustes'   },
 ];
 
 function NavBar({ activo, onChange }) {
@@ -2032,6 +2143,7 @@ function App() {
     historial:    <PantallaHistorial   uid={user.uid} />,
     presupuestos: <PantallaPresupuestos uid={user.uid} />,
     recetas:      <PantallaRecetas uid={user.uid} />,
+    ajustes:      <PantallaAjustes onLogout={logout} />,
   };
 
   return (
