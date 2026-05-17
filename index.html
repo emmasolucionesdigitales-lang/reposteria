@@ -2231,16 +2231,21 @@ function PantallaRecetas({ uid }) {
 // ══════════════════════════════════════════════════════════════════════
 function PantallaPlanificacion({ uid, ingBase, recBase }) {
   const hoy = () => new Date().toISOString().slice(0,10);
-  const [stock, setStock]         = useState([]);
-  const [planItems, setPlanItems] = useState([]);
-  const [guardado, setGuardado]   = useState(false);
-  const [editOpciones, setEditOpciones] = useState(null); // recetaId en edición
+  const [stock,      setStock]      = useState([]);
+  const [formItems,  setFormItems]  = useState([]);  // formulario actual (editable)
+  const [savedItems, setSavedItems] = useState([]);  // guardado en Firebase hoy (solo lectura)
+  const [guardado,   setGuardado]   = useState(false);
+  const [editOpciones, setEditOpciones] = useState(null);
+  const [sinPrecio,  setSinPrecio]  = useState(null);
 
   useEffect(() => {
     const u1 = db.collection(`reposteria/${uid}/stock`).orderBy('nombre','asc')
       .onSnapshot(snap => setStock(snap.docs.map(d=>({id:d.id,...d.data()}))));
     const u2 = db.collection(`reposteria/${uid}/planificacion`).doc(hoy())
-      .onSnapshot(snap => { if(snap.exists) setPlanItems(snap.data().items||[]); });
+      .onSnapshot(snap => {
+        // Solo actualiza savedItems — NUNCA sobreescribe el formulario
+        setSavedItems(snap.exists ? (snap.data().items||[]) : []);
+      });
     return () => { u1(); u2(); };
   }, [uid]);
 
@@ -2290,8 +2295,6 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
     const disponible = stk ? Number(stk.cantidad)||0 : 0;
     return { ing, disponible };
   };
-
-  const [sinPrecio, setSinPrecio] = useState(null);
 
   const guardar = async () => {
     // 1. Verificar precios en todos los items
@@ -2807,10 +2810,14 @@ function PantallaProductos({ uid }) {
   if (productosDelDia.length === 0) return (
     <div style={{paddingBottom:80}}>
       <Header titulo="🧁 Productos" />
-      <div style={{textAlign:'center',padding:'60px 24px'}}>
+      <div style={{textAlign:'center',padding:'40px 24px'}}>
         <div style={{fontSize:48,marginBottom:12}}>💰</div>
         <p style={{fontWeight:600,color:'var(--texto)',marginBottom:8}}>Falta definir los precios</p>
-        <p style={{color:'var(--texto2)',fontSize:14}}>En Planificación tocá el botón 💰 de cada producto para cargar los precios de venta.</p>
+        <p style={{color:'var(--texto2)',fontSize:14,marginBottom:20}}>En Planificación tocá el botón 💰 de cada producto para cargar los precios de venta.</p>
+        <button onClick={liquidarSobrantes}
+          style={{padding:'10px 20px',borderRadius:10,background:'rgba(192,57,43,0.08)',color:'var(--rojo)',border:'1px solid rgba(192,57,43,0.25)',fontSize:13,fontWeight:600,cursor:'pointer'}}>
+          ⚠️ Cerrar producción y liquidar sobrantes
+        </button>
       </div>
     </div>
   );
@@ -2818,6 +2825,14 @@ function PantallaProductos({ uid }) {
   return (
     <div style={{paddingBottom:80}}>
       <Header titulo="🧁 Productos del día" />
+      {(planItems||[]).some(i=>(i.disponible||0)>0) && (
+        <div style={{margin:'8px 16px 0'}}>
+          <button onClick={liquidarSobrantes}
+            style={{width:'100%',padding:'9px',borderRadius:10,background:'rgba(192,57,43,0.08)',color:'var(--rojo)',border:'1px solid rgba(192,57,43,0.25)',fontSize:13,fontWeight:600,cursor:'pointer'}}>
+            ⚠️ Cerrar producción y liquidar sobrantes
+          </button>
+        </div>
+      )}
       <div style={{display:'flex',flexDirection:'column',gap:0}}>
 
         {/* Lista productos */}
@@ -2906,7 +2921,7 @@ function PantallaProductos({ uid }) {
             </div>
             {confirmado && <div style={{background:'#d4edda',color:'#155724',borderRadius:8,padding:'8px',textAlign:'center',fontSize:13,marginBottom:8}}>✅ Venta confirmada</div>}
             <button onClick={confirmar} disabled={!carrito.length} style={{...S.btnPrimario,width:'100%',opacity:carrito.length?1:0.5}}>✓ Confirmar venta</button>
-            <button onClick={liquidarSobrantes} style={{...S.btn,width:'100%',marginTop:8,color:'var(--rojo)',fontSize:12}}>⚠️ Liquidar sobrantes del día</button>
+
           </div>
         </div>
 
