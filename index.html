@@ -2273,10 +2273,14 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
   }
 
   const hayPlan = planItems.length > 0;
+  // Factor de conversión: receta usa unidad base (g/ml/unidades)
+  // stock usa unidad de compra (kg/litro/docena/unidad)
+  const CONV = { kg:1000, litro:1000, docena:12, unidad:1 };
+  const stockEnBase = (s) => s.disponible * (CONV[s.ing.unidad]||1);
+
   const hayAlerta = Object.entries(ingNecesarios).some(([ingId, cant]) => {
     const s = getStockInfo(ingId); if(!s) return false;
-    const dispGr = s.ing.unidad==='kg' ? s.disponible*1000 : s.disponible;
-    return cant > dispGr;
+    return cant > stockEnBase(s);
   });
 
   return (
@@ -2344,11 +2348,21 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
               {Object.entries(ingNecesarios).map(([ingId, cant], idx, arr) => {
                 const s = getStockInfo(ingId);
                 if (!s) return null;
-                const esKg = s.ing.unidad === 'kg';
-                const dispGr = esKg ? s.disponible * 1000 : s.disponible;
-                const falta = cant > dispGr;
-                const cantLabel = esKg ? (cant>=1000?(cant/1000).toFixed(2)+' kg':cant+'g') : cant+' '+s.ing.unidad;
-                const dispLabel = esKg ? s.disponible.toFixed(2)+' kg' : s.disponible+' '+s.ing.unidad;
+                const factor   = CONV[s.ing.unidad] || 1;
+                const stockBase = s.disponible * factor; // stock en unidad base (g/ml/unid)
+                const falta    = cant > stockBase;
+                // Mostrar en unidad de compra (más legible)
+                const cantStock = cant / factor;
+                const dispStock = s.disponible;
+                const unidLabel = s.ing.unidad;
+                const fmtCant = (v, u) => {
+                  if (u==='kg')    return v>=1 ? v.toFixed(2)+' kg'  : Math.round(v*1000)+'g';
+                  if (u==='litro') return v>=1 ? v.toFixed(2)+' L'   : Math.round(v*1000)+'ml';
+                  if (u==='docena') return v.toFixed(2)+' doc.';
+                  return v.toFixed(2)+' u';
+                };
+                const cantLabel = fmtCant(cantStock, unidLabel);
+                const dispLabel = fmtCant(dispStock, unidLabel);
                 return (
                   <div key={ingId} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 12px', borderBottom: idx<arr.length-1?'1px solid var(--beige)':'none', background: falta?'rgba(230,126,34,0.06)':'transparent' }}>
                     <span style={{ fontSize:13, color:'var(--texto)', fontWeight:falta?600:400 }}>{s.ing.nombre}</span>
@@ -2634,9 +2648,9 @@ function PantallaResumen({ uid, ingBase, recBase }) {
         if (!ing || !ing.precio) continue;
         // cantidad en gramos/ml/unidades → convertir a unidad de compra
         const precioXUnidad = ing.precio;
-        const cantXUnidad = ing.unidad==='kg' ? ri.cantidad/1000 :
-                            ing.unidad==='litro' ? ri.cantidad/1000 :
-                            ri.cantidad;
+        // Convertir cantidad base de receta a unidad de compra para calcular costo
+        const CONV_R = { kg:1000, litro:1000, docena:12, unidad:1 };
+        const cantXUnidad = ri.cantidad / (CONV_R[ing.unidad]||1);
         total += precioXUnidad * cantXUnidad * item.cantidad;
       }
     }
