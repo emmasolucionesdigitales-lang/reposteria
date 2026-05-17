@@ -217,15 +217,25 @@ function Campo({ label, value, onChange, placeholder, tipo = 'text', rows, child
 
 // ── TIPOS DE PRODUCTO ────────────────────────────────────────────────
 const TIPOS_PRODUCTO = [
-  { id:'torta',       label:'🎂 Torta',         modo:'porcionable', porcionesDefault:8  },
-  { id:'tarta',       label:'🥧 Tarta',         modo:'porcionable', porcionesDefault:8  },
-  { id:'bizcochuelo', label:'🍰 Bizcochuelo',   modo:'porcionable', porcionesDefault:8  },
-  { id:'factura',     label:'🥐 Factura',       modo:'individual',  porcionesDefault:12 },
-  { id:'bola',        label:'🍩 Bola de fraile',modo:'individual',  porcionesDefault:12 },
-  { id:'rosca',       label:'🌀 Rosca',         modo:'individual',  porcionesDefault:6  },
-  { id:'pan',         label:'🍞 Pan',           modo:'individual',  porcionesDefault:1  },
-  { id:'alfajor',     label:'🍪 Alfajor',       modo:'individual',  porcionesDefault:12 },
-  { id:'delicia',     label:'🍬 Delicia',       modo:'individual',  porcionesDefault:12 },
+  // ── Porcionables (se venden enteros o por porción) ───────────────
+  { id:'torta',       label:'🎂 Torta',            modo:'porcionable', porcionesDefault:8  },
+  { id:'tarta',       label:'🥧 Tarta',            modo:'porcionable', porcionesDefault:8  },
+  { id:'bizcochuelo', label:'🍰 Bizcochuelo',      modo:'porcionable', porcionesDefault:8  },
+  { id:'lemon_pie',   label:'🍋 Lemon Pie',        modo:'porcionable', porcionesDefault:8  },
+  { id:'cheesecake',  label:'🧀 Cheesecake',       modo:'porcionable', porcionesDefault:8  },
+  // ── Individuales × 12 (unidad o docena) ──────────────────────────
+  { id:'factura',     label:'🥐 Factura/Medialuna',modo:'individual',  porcionesDefault:12 },
+  { id:'bola',        label:'🍩 Bola de fraile',   modo:'individual',  porcionesDefault:12 },
+  { id:'alfajor',     label:'🍪 Alfajor',          modo:'individual',  porcionesDefault:12 },
+  { id:'dona',        label:'🍩 Dona',             modo:'individual',  porcionesDefault:12 },
+  { id:'muffin',      label:'🧁 Muffin/Cupcake',  modo:'individual',  porcionesDefault:12 },
+  { id:'cookie',      label:'🍪 Cookie/Galletita', modo:'individual',  porcionesDefault:12 },
+  // ── Individuales × 6 ─────────────────────────────────────────────
+  { id:'rosca',       label:'🌀 Rosca',            modo:'individual',  porcionesDefault:6  },
+  { id:'pionono',     label:'🌀 Pionono',          modo:'individual',  porcionesDefault:6  },
+  // ── Unidades sueltas ─────────────────────────────────────────────
+  { id:'pan',         label:'🍞 Pan',              modo:'individual',  porcionesDefault:1  },
+  { id:'delicia',     label:'🍬 Otra delicia',     modo:'individual',  porcionesDefault:12 },
 ];
 const getTipo = (id) => TIPOS_PRODUCTO.find(t=>t.id===id) || TIPOS_PRODUCTO[TIPOS_PRODUCTO.length-1];
 
@@ -2547,20 +2557,26 @@ function ModalOpciones({ item, ingBase, recBase, onGuardar, onCancelar }) {
     ];
   },[tipo.id, rindeNum, margenSug, costoReceta]);
 
-  // Si ya tenía opciones guardadas con precios, usarlas como base pero recalcular
+  // Combinar estructura de opcionesDefault con precios guardados previamente
   const opcionesIniciales = React.useMemo(() => {
     const saved = item.opciones || [];
-    if (saved.length === 0) return opcionesDefault;
-    // Verificar si las opciones guardadas tienen el tipo correcto
-    const tieneEntera   = saved.some(o=>o.label==='Entera');
-    const tienePorcion  = saved.some(o=>o.label?.includes('porción'));
-    const tieneDocena   = saved.some(o=>o.label?.includes('docena')||o.label?.includes('lote'));
-    const tieneUnidad   = saved.some(o=>o.label?.includes('unidad'));
-    // Si el tipo es porcionable pero no tiene ambas → regenerar
-    if (tipo.modo==='porcionable' && (!tieneEntera || !tienePorcion)) return opcionesDefault;
-    // Si el tipo es individual pero no tiene ambas → regenerar  
-    if (tipo.modo==='individual' && (!tieneDocena || !tieneUnidad)) return opcionesDefault;
-    return saved;
+    // Siempre partir de la estructura correcta según el tipo
+    // y solo rescatar los PRECIOS si el usuario los había editado
+    return opcionesDefault.map(op => {
+      // Buscar si había un precio guardado para esta opción (por label similar)
+      const guardada = saved.find(s => {
+        if (op.label === 'Entera') return s.label === 'Entera' || s.label?.includes('ntera');
+        if (op.label?.includes('porción')) return s.label?.includes('porción') || s.label?.includes('porcion');
+        if (op.label?.includes('docena') || op.label?.includes('lote')) return s.label?.includes('docena') || s.label?.includes('lote');
+        if (op.label?.includes('unidad') || op.label?.includes('pieza')) return s.label?.includes('unidad') || s.label?.includes('pieza');
+        return false;
+      });
+      // Si tenía precio manual guardado, conservarlo — sino usar el calculado
+      if (guardada && guardada.precioManual && Number(guardada.precio) > 0) {
+        return { ...op, precio: guardada.precio, precioManual: true };
+      }
+      return op; // usar precio calculado automáticamente
+    });
   },[]);
 
   const [opciones, setOpciones] = useState(opcionesIniciales);
@@ -2669,7 +2685,7 @@ function ModalOpciones({ item, ingBase, recBase, onGuardar, onCancelar }) {
 // ══════════════════════════════════════════════════════════════════════
 // PANTALLA: PRODUCTOS (venta diaria — viene de la planificación)
 // ══════════════════════════════════════════════════════════════════════
-function PantallaProductos({ uid }) {
+function PantallaProductos({ uid, ingBase, recBase }) {
   const hoy = () => new Date().toISOString().slice(0,10);
   const [planItems, setPlanItems] = useState(null);
   const [carrito,   setCarrito]   = useState([]);
@@ -2682,7 +2698,61 @@ function PantallaProductos({ uid }) {
       .onSnapshot(snap => setPlanItems(snap.exists ? (snap.data().items||[]) : []));
   }, [uid]);
 
-  const productosDelDia = (planItems||[]).filter(i => i.opciones && i.opciones.some(o=>Number(o.precio)>0));
+  const CONV_P = { kg:1000, litro:1000, docena:12, unidad:1 };
+
+  // Calcular costo de 1 batch de una receta
+  const calcCostoRec = (recetaId) => {
+    const rec = (recBase||[]).find(r=>r.id===recetaId);
+    if (!rec) return 0;
+    return Math.round((rec.ingredientes||[]).reduce((s,ri)=>{
+      const ing = (ingBase||[]).find(i=>i.id===ri.ingId);
+      if (!ing||!ing.precio) return s;
+      return s + (ri.cantidad/(CONV_P[ing.unidad]||1)) * ing.precio;
+    },0));
+  };
+
+  // Normaliza las opciones de un item: siempre genera 2 opciones correctas
+  const normalizarOpciones = (item) => {
+    const rec = (recBase||[]).find(r=>r.id===item.recetaId);
+    const tipo = getTipo(rec?.tipo||'delicia');
+    const rindeNum = rec?.rinde_num || item.rindeNum || tipo.porcionesDefault;
+    const costo = calcCostoRec(item.recetaId);
+    const margenSug = 50; // margen por defecto si no hay datos
+
+    const saved = item.opciones || [];
+    const tieneDocena = saved.some(o=>o.label?.includes('docena')||o.label?.includes('lote'));
+    const tienePorcion = saved.some(o=>o.label?.includes('porción'));
+    const tieneEntera = saved.some(o=>o.label==='Entera');
+
+    // Si tiene las 2 opciones correctas → devolver tal cual
+    if (tipo.modo==='porcionable' && tieneEntera && tienePorcion) return saved;
+    if (tipo.modo==='individual' && tieneDocena) return saved;
+
+    // Regenerar opciones correctas con precio calculado
+    const calcP = (u) => costo>0 ? Math.round((costo/u)*(1+margenSug/100)) : 0;
+
+    if (tipo.modo==='porcionable') {
+      const precioEntera = saved[0]?.precio || calcP(1);
+      const precioPorc   = Math.round(precioEntera/rindeNum);
+      return [
+        { id:'o1', label:'Entera', precio:precioEntera, deduccion:rindeNum, unidades:1 },
+        { id:'o2', label:'Por porción ('+rindeNum+' c/u)', precio:precioPorc, deduccion:1, unidades:rindeNum },
+      ];
+    }
+    // Individual: si tenía precio guardado como "Por unidad" (batch completo), dividir
+    const precioGuardado = saved[0]?.precio || 0;
+    const esPreBatch = precioGuardado > 0 && rindeNum > 1 && !tieneDocena;
+    const precioDocena = esPreBatch ? precioGuardado : (calcP(1) || precioGuardado * rindeNum);
+    const precioUnidad = esPreBatch ? Math.round(precioGuardado/rindeNum) : Math.round(precioDocena/rindeNum);
+    return [
+      { id:'o1', label:'Por docena ('+rindeNum+' u.)', precio:precioDocena, deduccion:rindeNum, unidades:1 },
+      { id:'o2', label:'Por unidad (1 pieza)', precio:precioUnidad, deduccion:1, unidades:rindeNum },
+    ];
+  };
+
+  const productosDelDia = (planItems||[])
+    .filter(i => i.opciones && i.opciones.some(o=>Number(o.precio)>0))
+    .map(i => ({...i, opciones: normalizarOpciones(i)}));
 
   // Disponible real = disponible en Firebase − lo que está en el carrito aún no confirmado
   const getDisponible = (recetaId) => {
@@ -2690,24 +2760,34 @@ function PantallaProductos({ uid }) {
     if (!item) return 0;
     const base = item.disponible ?? 0;
     // Restar lo que ya está en el carrito
+    // Ahora el carrito siempre trabaja en unidades individuales (deduccion=1 por defecto)
     const enCarrito = carrito.filter(c=>c.recetaId===recetaId)
-      .reduce((s,c)=>s+c.deduccion*c.cantidad,0);
+      .reduce((s,c)=>s+(c.deduccion||1)*c.cantidad,0);
     return Math.max(0, base - enCarrito);
   };
 
   const agregar = (item, op) => {
-    const disp = getDisponible(item.recetaId);
-    const deduccion = op.deduccion || 1;
-    if (disp < deduccion) return; // no hay suficiente
-    const key = `${item.recetaId}_${op.id}`;
+    const disp      = getDisponible(item.recetaId);
+    const deduccion = op.deduccion || 1;            // cuántas unidades representa esta opción
+    const precioUnit= Math.round(op.precio / deduccion); // precio por 1 unidad individual
+    if (disp < deduccion) return;                   // no hay suficiente stock
+
+    // El carrito SIEMPRE trabaja en unidades individuales
+    // "Por docena" agrega 12 unidades de una vez al precio unitario
+    const key = item.recetaId + '_unidad_' + op.id; // misma key para unificar
     setCarrito(prev => {
       const e = prev.find(i=>i.key===key);
-      if (e) return prev.map(i=>i.key===key?{...i,cantidad:i.cantidad+1}:i);
+      if (e) {
+        // Agregar deduccion unidades más
+        return prev.map(i=>i.key===key?{...i,cantidad:i.cantidad+deduccion}:i);
+      }
       return [...prev, {
         key, recetaId:item.recetaId,
         emoji:item.recetaEmoji, nombre:item.recetaNombre,
-        opLabel:op.label, precio:op.precio,
-        deduccion, cantidad:1
+        opLabel: deduccion>1 ? op.label : 'Por unidad',
+        precio: precioUnit,   // precio de 1 unidad
+        deduccion: 1,         // cada unidad en carrito = 1 del stock
+        cantidad: deduccion,  // empezamos con tantas unidades como indica la opción
       }];
     });
   };
@@ -2715,11 +2795,10 @@ function PantallaProductos({ uid }) {
   const cambiar = (key, delta) => {
     setCarrito(prev => {
       if (delta > 0) {
-        // Verificar disponible antes de agregar
         const item = prev.find(i=>i.key===key);
         if (item) {
           const disp = getDisponible(item.recetaId);
-          if (disp < item.deduccion) return prev;
+          if (disp < 1) return prev; // no hay stock para 1 unidad más
         }
       }
       return prev.map(i=>i.key===key?{...i,cantidad:Math.max(0,i.cantidad+delta)}:i).filter(i=>i.cantidad>0);
@@ -2883,8 +2962,8 @@ function PantallaProductos({ uid }) {
                 {carrito.map(i=>(
                   <div key={i.key} style={{display:'flex',alignItems:'center',justifyContent:'space-between',background:'var(--crema)',borderRadius:8,padding:'7px 10px'}}>
                     <div style={{minWidth:0,flex:1}}>
-                      <div style={{fontSize:13,fontWeight:500,color:'var(--texto)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{i.emoji} {i.nombre} · {i.opLabel}</div>
-                      <div style={{fontSize:11,color:'var(--texto2)'}}>${i.precio.toLocaleString('es-AR')} c/u</div>
+                      <div style={{fontSize:13,fontWeight:500,color:'var(--texto)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{i.emoji} {i.nombre}</div>
+                      <div style={{fontSize:11,color:'var(--texto2)'}}>${i.precio.toLocaleString('es-AR')} por unidad</div>
                     </div>
                     <div style={{display:'flex',alignItems:'center',gap:5,flexShrink:0}}>
                       <button onClick={()=>cambiar(i.key,-1)} style={{width:22,height:22,borderRadius:'50%',border:'1px solid var(--beige2)',background:'none',cursor:'pointer',color:'var(--texto)',fontSize:14}}>-</button>
@@ -3195,7 +3274,7 @@ function App() {
   const ingBase = ING_DEFAULT_RC;
   const recBase = REC_DEFAULT_RC;
   const pantallas = {
-    productos:     <PantallaProductos    uid={user.uid} />,
+    productos:     <PantallaProductos    uid={user.uid} ingBase={ingBase} recBase={recBase} />,
     pedidos:       <PantallaPedidos      uid={user.uid} />,
     recetas:       <PantallaRecetas      uid={user.uid} />,
     resumen:       <PantallaResumen      uid={user.uid} ingBase={ingBase} recBase={recBase} />,
