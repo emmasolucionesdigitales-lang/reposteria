@@ -2692,6 +2692,12 @@ function PantallaProductos({ uid, ingBase, recBase }) {
   const [pago,      setPago]      = useState('efectivo');
   const [entrega,   setEntrega]   = useState('retira');
   const [confirmado,setConfirmado]= useState(false);
+  // Datos del cliente
+  const [clienteNombre, setClienteNombre] = useState('');
+  const [clienteTel,    setClienteTel]    = useState('');
+  const [clienteDir,    setClienteDir]    = useState('');
+  const [clienteHora,   setClienteHora]   = useState('');
+  const [clienteNota,   setClienteNota]   = useState('');
 
   useEffect(() => {
     return db.collection(`reposteria/${uid}/planificacion`).doc(hoy())
@@ -2852,7 +2858,16 @@ function PantallaProductos({ uid, ingBase, recBase }) {
       items: carrito.map(i=>({ nombre:`${i.emoji} ${i.nombre}`, opcion:i.opLabel, precio:i.precio, cantidad:i.cantidad, subtotal:i.precio*i.cantidad })),
       total, pago, entrega,
       confirmado: pago !== 'transferencia',
+      cliente: {
+        nombre:  clienteNombre.trim(),
+        tel:     clienteTel.trim(),
+        dir:     clienteDir.trim(),
+        hora:    clienteHora.trim(),
+        nota:    clienteNota.trim(),
+      },
     });
+    // Limpiar datos del cliente
+    setClienteNombre(''); setClienteTel(''); setClienteDir(''); setClienteHora(''); setClienteNota('');
     // Descontar disponible en planificación
     const snap = await db.collection(`reposteria/${uid}/planificacion`).doc(hoy()).get();
     if (snap.exists) {
@@ -2986,11 +3001,40 @@ function PantallaProductos({ uid, ingBase, recBase }) {
 
           {/* Entrega */}
           <p style={{fontSize:11,fontWeight:700,color:'var(--texto2)',textTransform:'uppercase',marginBottom:6}}>Entrega</p>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginBottom:12}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginBottom:10}}>
             {ENTREGAS.map(([k,l])=>(
               <button key={k} onClick={()=>setEntrega(k)} style={{padding:'7px 4px',borderRadius:8,fontSize:12,fontWeight:entrega===k?700:400,border:entrega===k?'2px solid var(--caramelo)':'1px solid var(--beige)',background:entrega===k?'var(--beige)':'none',color:'var(--texto)',cursor:'pointer'}}>{l}</button>
             ))}
           </div>
+
+          {/* Datos del cliente — aparecen según pago/entrega */}
+          {(entrega==='envio' || pago==='transferencia' || pago==='debito' || pago==='credito') && (
+            <div style={{background:'var(--beige)',borderRadius:10,padding:'10px 12px',marginBottom:10}}>
+              <p style={{fontSize:11,fontWeight:700,color:'var(--texto2)',textTransform:'uppercase',marginBottom:8}}>
+                {entrega==='envio' ? '🛵 Datos del envío' : '👤 Datos del cliente'}
+              </p>
+              <input value={clienteNombre} onChange={e=>setClienteNombre(e.target.value)}
+                placeholder="Nombre del cliente" style={{...S.inp,width:'100%',marginBottom:6,fontSize:13}}/>
+              <input value={clienteTel} onChange={e=>setClienteTel(e.target.value)}
+                placeholder="Teléfono / WhatsApp" style={{...S.inp,width:'100%',marginBottom:6,fontSize:13}}
+                type="tel"/>
+              {entrega==='envio' && <>
+                <input value={clienteDir} onChange={e=>setClienteDir(e.target.value)}
+                  placeholder="Dirección de entrega" style={{...S.inp,width:'100%',marginBottom:6,fontSize:13}}/>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:6}}>
+                  <input value={clienteHora} onChange={e=>setClienteHora(e.target.value)}
+                    placeholder="Hora de entrega" style={{...S.inp,fontSize:13}} type="time"/>
+                  <input value={clienteNota} onChange={e=>setClienteNota(e.target.value)}
+                    placeholder="Nota / referencia" style={{...S.inp,fontSize:13}}/>
+                </div>
+              </>}
+              {pago==='transferencia' && (
+                <div style={{fontSize:11,color:'var(--naranja)',marginTop:2,fontWeight:600}}>
+                  ⏳ Recordá confirmar la transferencia en el Resumen cuando llegue
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Total */}
           <div style={{borderTop:'1px solid var(--beige)',paddingTop:10}}>
