@@ -383,6 +383,7 @@ function PantallaAjustes({ onLogout }) {
 const TABS = [
   { id: 'productos',     icon: '🧁', label: 'Productos'  },
   { id: 'pedidos',       icon: '📋', label: 'Pedidos'    },
+  { id: 'resumen',       icon: '📊', label: 'Resumen'    },
   { id: 'recetas',       icon: '🍰', label: 'Recetas'    },
   { id: 'planificacion', icon: '📐', label: 'Planif.'   },
   { id: 'ajustes',       icon: '⚙️', label: 'Ajustes'   },
@@ -1773,44 +1774,115 @@ function PantallaRecetas({ uid }) {
   };
 
   // ── INGREDIENTES TAB ──────────────────────────────
-  const TabStock = () => (
-    <div style={{ padding:'12px 16px 120px' }}>
-      <div style={{ background:'#FEF3E2', border:'1px solid #F39C12', borderRadius:10, padding:'10px 13px', marginBottom:14, fontSize:12, color:'#7D5A1A' }}>
-        💡 <b>Actualizá los precios regularmente.</b> En Argentina los precios cambian seguido. Mantenerlos al día hace que el cálculo sea preciso.
-      </div>
-      {ing.length === 0 && (
-        <div style={{ textAlign:'center', padding:'50px 20px', color:'var(--texto2)' }}>
-          <div style={{ fontSize:48 }}>🧂</div>
-          <p style={{ marginTop:10 }}>No hay ingredientes todavía.<br/>Tocá <b>+</b> para agregar.</p>
+  const TabStock = () => {
+    const [stockFb, setStockFb] = useState([]);
+    const [editPrecio, setEditPrecio] = useState(null); // {id, valor}
+    useEffect(() => {
+      return db.collection(`reposteria/${uid}/stock`).orderBy('nombre','asc')
+        .onSnapshot(snap => setStockFb(snap.docs.map(d=>({id:d.id,...d.data()}))));
+    }, []);
+
+    const getQty = (nombre) => {
+      const s = stockFb.find(s => s.nombre.toLowerCase().trim() === nombre.toLowerCase().trim());
+      return s ? Number(s.cantidad)||0 : null;
+    };
+
+    const ajustarQty = async (nombre, delta) => {
+      const s = stockFb.find(s => s.nombre.toLowerCase().trim() === nombre.toLowerCase().trim());
+      if (s) {
+        const nueva = Math.max(0, (Number(s.cantidad)||0) + delta);
+        await db.collection(`reposteria/${uid}/stock`).doc(s.id).update({ cantidad: nueva });
+      } else {
+        // Crear en Firestore si no existe
+        const ing = ing.find(i=>i.nombre===nombre);
+        await db.collection(`reposteria/${uid}/stock`).add({
+          nombre, cantidad: Math.max(0, delta),
+          unidad: ing?.unidad||'kg', stockMinimo: 0, costoUnitario: 0
+        });
+      }
+    };
+
+    const guardarPrecioVenta = (id, valor) => {
+      saveIng(ing.map(i => i.id===id ? {...i, precioVenta: Number(valor)||0} : i));
+      setEditPrecio(null);
+    };
+
+    const precioVentaSug = (item) => item.precioVenta || Math.round((item.precio||0) * (1+(item.margen||0)/100));
+
+    return (
+      <div style={{ padding:'12px 16px 120px' }}>
+        <div style={{ background:'#FEF3E2', border:'1px solid #F39C12', borderRadius:10, padding:'9px 12px', marginBottom:12, fontSize:12, color:'#7D5A1A' }}>
+          💡 Actualizá los precios y la cantidad disponible. Si la cantidad es 0 aparece en rojo.
         </div>
-      )}
-      {ing.map(item => {
-        const unitLabel = { kg:'/ kg', litro:'/ litro', docena:'/ docena', unidad:'/ unidad' }[item.unidad]||'';
-        return (
-          <div key={item.id} style={{ background:'var(--superficie)', borderRadius:14, padding:'14px 16px', marginBottom:10, border:'1px solid var(--beige)', boxShadow:'var(--sombra)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:10 }}>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontWeight:700, fontSize:15, color:'var(--chocolate)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.nombre}</div>
-              <div style={{ fontSize:13, color:'var(--caramelo)', marginTop:2, fontWeight:600 }}>
-                {rcPeso(item.precio)} <span style={{ color:'var(--texto2)', fontWeight:400 }}>{unitLabel}</span>
-                {item.margen > 0 && <span style={{ marginLeft:8, fontSize:11, background:'var(--beige)', color:'var(--cacao)', borderRadius:6, padding:'1px 6px' }}>+{item.margen}% · venta: {rcPeso(Math.round(item.precio*(1+item.margen/100)))}</span>}
+        {ing.length === 0 && (
+          <div style={{ textAlign:'center', padding:'40px 20px', color:'var(--texto2)' }}>
+            <div style={{ fontSize:48 }}>🧂</div>
+            <p style={{ marginTop:10 }}>No hay ingredientes.<br/>Tocá <b>+</b> para agregar.</p>
+          </div>
+        )}
+        {ing.map(item => {
+          const qty = getQty(item.nombre);
+          const sinStock = qty === null || qty === 0;
+          const unitLabel = { kg:'/ kg', litro:'/ litro', docena:'/ docena', unidad:'/ unidad' }[item.unidad]||'';
+          const pVenta = precioVentaSug(item);
+          const editandoEste = editPrecio && editPrecio.id === item.id;
+          return (
+            <div key={item.id} style={{ background:'var(--superficie)', borderRadius:14, padding:'12px 14px', marginBottom:10, border: sinStock ? '1.5px solid var(--rojo)' : '1px solid var(--beige)', boxShadow:'var(--sombra)', backgroundColor: sinStock ? 'rgba(192,57,43,0.04)' : 'var(--superficie)' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10 }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                    <span style={{ fontWeight:700, fontSize:15, color: sinStock ? 'var(--rojo)' : 'var(--chocolate)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.nombre}</span>
+                    {sinStock && <span style={{ fontSize:10, fontWeight:700, background:'var(--rojo)', color:'white', borderRadius:6, padding:'1px 6px', flexShrink:0 }}>SIN STOCK</span>}
+                  </div>
+
+                  {/* Cantidad disponible */}
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+                    <span style={{ fontSize:12, color:'var(--texto2)' }}>Disponible:</span>
+                    <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                      <button onClick={() => ajustarQty(item.nombre, -1)} style={{ width:22, height:22, borderRadius:'50%', border:'1px solid var(--beige2)', background:'none', cursor:'pointer', color:'var(--texto)', fontSize:13 }}>-</button>
+                      <span style={{ fontSize:14, fontWeight:700, color: sinStock ? 'var(--rojo)' : 'var(--verde)', minWidth:24, textAlign:'center' }}>{qty??0}</span>
+                      <button onClick={() => ajustarQty(item.nombre, +1)} style={{ width:22, height:22, borderRadius:'50%', border:'1px solid var(--beige2)', background:'none', cursor:'pointer', color:'var(--texto)', fontSize:13 }}>+</button>
+                      <span style={{ fontSize:12, color:'var(--texto2)' }}>{item.unidad}</span>
+                    </div>
+                  </div>
+
+                  {/* Precio costo y venta */}
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
+                    <span style={{ fontSize:12, color:'var(--texto2)' }}>Costo: <b style={{color:'var(--texto)'}}>{rcPeso(item.precio||0)}</b> {unitLabel}</span>
+                    <span style={{ fontSize:11, color:'var(--texto2)' }}>·</span>
+                    {editandoEste ? (
+                      <div style={{ display:'flex', gap:5, alignItems:'center' }}>
+                        <span style={{ fontSize:12, color:'var(--texto2)' }}>Venta: $</span>
+                        <input type="number" defaultValue={pVenta} id={`pv_${item.id}`}
+                          style={{ width:80, padding:'3px 6px', borderRadius:6, border:'1px solid var(--caramelo)', fontSize:13, background:'var(--superficie)', color:'var(--texto)' }}
+                          onKeyDown={e => e.key==='Enter' && guardarPrecioVenta(item.id, document.getElementById(`pv_${item.id}`).value)}
+                        />
+                        <button onClick={() => guardarPrecioVenta(item.id, document.getElementById(`pv_${item.id}`).value)}
+                          style={{ background:'var(--verde)', color:'white', border:'none', borderRadius:6, padding:'3px 8px', cursor:'pointer', fontSize:12 }}>✓</button>
+                        <button onClick={() => setEditPrecio(null)}
+                          style={{ background:'none', border:'1px solid var(--beige2)', borderRadius:6, padding:'3px 8px', cursor:'pointer', fontSize:12, color:'var(--texto2)' }}>✕</button>
+                      </div>
+                    ) : (
+                      <span style={{ fontSize:12, color:'var(--verde)', fontWeight:600, cursor:'pointer' }} onClick={() => setEditPrecio({id:item.id})}>
+                        Venta: {rcPeso(pVenta)} {item.margen>0 && !item.precioVenta ? `(+${item.margen}%)` : item.precioVenta ? '✏️' : ''} ✏️
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ display:'flex', flexDirection:'column', gap:5, flexShrink:0 }}>
+                  <button onClick={() => setModIngr(item)} style={{ ...S.btnSecundario, padding:'5px 10px', fontSize:12 }}>✏️</button>
+                  <button onClick={() => { if(!confirm('¿Eliminar?')) return; saveIng(ing.filter(i=>i.id!==item.id)); }}
+                    style={{ ...S.btnSecundario, padding:'5px 10px', fontSize:12, color:'var(--rojo)' }}>🗑</button>
+                </div>
               </div>
             </div>
-            <div style={{ display:'flex', gap:7, flexShrink:0 }}>
-              <button onClick={() => setModIngr(item)}
-                style={{ ...S.btnSecundario, padding:'6px 11px', fontSize:13 }}>✏️</button>
-              <button onClick={() => {
-                if (!confirm('¿Eliminar este ingrediente?')) return;
-                saveIng(ing.filter(i => i.id !== item.id));
-              }}
-                style={{ ...S.btnSecundario, padding:'6px 11px', fontSize:13, color:'var(--rojo)' }}>🗑</button>
-            </div>
-          </div>
-        );
-      })}
-      <button onClick={() => setModIngr({})}
-        style={{ ...S.btnPrimario, width:'100%', padding:13, marginTop:6 }}>+ Nuevo ingrediente</button>
-    </div>
-  );
+          );
+        })}
+        <button onClick={() => setModIngr({})} style={{ ...S.btnPrimario, width:'100%', padding:13, marginTop:6 }}>+ Nuevo ingrediente</button>
+      </div>
+    );
+  };
 
   // ── RECETAS TAB ───────────────────────────────────
   const TabRecetas = () => (
@@ -2382,6 +2454,7 @@ function PantallaProductos({ uid }) {
       tipo: 'mostrador',
       items: carrito.map(i=>({ nombre:`${i.emoji} ${i.nombre}`, opcion:i.opLabel, precio:i.precio, cantidad:i.cantidad, subtotal:i.precio*i.cantidad })),
       total, pago, entrega,
+      confirmado: pago !== 'transferencia', // transferencias arrancan como pendientes
     });
     setCarrito([]);
     setConfirmado(true);
@@ -2496,6 +2569,237 @@ function PantallaProductos({ uid }) {
   );
 }
 
+
+// ══════════════════════════════════════════════════════════════════════
+// PANTALLA: RESUMEN FINANCIERO
+// Ventas · Costos · Ganancias · Formas de pago · Por producto
+// ══════════════════════════════════════════════════════════════════════
+function PantallaResumen({ uid, ingBase, recBase }) {
+  const [periodo, setPeriodo] = useState('hoy');
+  const [pedidos, setPedidos] = useState([]);
+  const [planItems, setPlanItems] = useState([]);
+  const [cargando, setCargando] = useState(true);
+
+  const hoy = new Date().toISOString().slice(0,10);
+  const semanaAtras = new Date(Date.now()-7*86400000).toISOString().slice(0,10);
+  const mesActual   = hoy.slice(0,7);
+
+  useEffect(() => {
+    const u = db.collection(`reposteria/${uid}/pedidos`)
+      .orderBy('fecha','desc').limit(200)
+      .onSnapshot(snap => {
+        setPedidos(snap.docs.map(d=>({id:d.id,...d.data()})));
+        setCargando(false);
+      });
+    // Planificación de hoy para calcular costo
+    db.collection(`reposteria/${uid}/planificacion`).doc(hoy)
+      .get().then(snap => { if(snap.exists) setPlanItems(snap.data().items||[]); });
+    return u;
+  }, [uid]);
+
+  // ── Filtrar pedidos por período ────────────────────────────────────
+  const filtrar = (p) => {
+    if (periodo==='hoy')    return p.fecha === hoy;
+    if (periodo==='semana') return p.fecha >= semanaAtras;
+    if (periodo==='mes')    return p.fecha?.slice(0,7) === mesActual;
+    return true;
+  };
+  const pedidosFiltrados = pedidos.filter(filtrar);
+
+  // ── Calcular totales de ventas ─────────────────────────────────────
+  const totalVentas    = pedidosFiltrados.reduce((s,p)=>s+(Number(p.total)||0),0);
+  const porPago = { efectivo:0, transferencia:0, debito:0, credito:0 };
+  const transferenciasPend = [];
+  pedidosFiltrados.forEach(p => {
+    const monto = Number(p.total)||0;
+    const pago = p.pago||'efectivo';
+    if (pago==='transferencia') {
+      if (p.confirmado) { porPago.transferencia += monto; }
+      else { transferenciasPend.push(p); }
+    } else {
+      porPago[pago] = (porPago[pago]||0) + monto;
+    }
+  });
+  const transferConfirmada  = porPago.transferencia;
+  const transferPendiente   = transferenciasPend.reduce((s,p)=>s+(Number(p.total)||0),0);
+
+  // ── Calcular costo de producción (desde planificación del día) ─────
+  const calcCosto = () => {
+    let total = 0;
+    for (const item of planItems) {
+      const rec = (recBase||[]).find(r=>r.id===item.recetaId);
+      if (!rec) continue;
+      for (const ri of (rec.ingredientes||[])) {
+        const ing = (ingBase||[]).find(i=>i.id===ri.ingId);
+        if (!ing || !ing.precio) continue;
+        // cantidad en gramos/ml/unidades → convertir a unidad de compra
+        const precioXUnidad = ing.precio;
+        const cantXUnidad = ing.unidad==='kg' ? ri.cantidad/1000 :
+                            ing.unidad==='litro' ? ri.cantidad/1000 :
+                            ri.cantidad;
+        total += precioXUnidad * cantXUnidad * item.cantidad;
+      }
+    }
+    return Math.round(total);
+  };
+  const costoProd   = periodo==='hoy' ? calcCosto() : 0;
+  const ganancia    = totalVentas - costoProd;
+  const margenPct   = totalVentas > 0 ? Math.round((ganancia/totalVentas)*100) : 0;
+
+  // ── Por producto ───────────────────────────────────────────────────
+  const porProducto = {};
+  pedidosFiltrados.forEach(p => {
+    (p.items||[]).forEach(it => {
+      const k = it.nombre||'Sin nombre';
+      if (!porProducto[k]) porProducto[k] = { nombre:k, cantidad:0, total:0 };
+      porProducto[k].cantidad += Number(it.cantidad)||1;
+      porProducto[k].total    += Number(it.subtotal)||Number(it.precio)||0;
+    });
+  });
+  const rankProductos = Object.values(porProducto).sort((a,b)=>b.total-a.total);
+
+  // ── Confirmar transferencia ────────────────────────────────────────
+  const confirmarTransfer = async (id) => {
+    await db.collection(`reposteria/${uid}/pedidos`).doc(id).update({ confirmado: true });
+  };
+
+  const fmt = (n) => '$'+Math.round(n).toLocaleString('es-AR');
+  const PERIODOS = [['hoy','Hoy'],['semana','7 días'],['mes','Este mes']];
+  const pagoLabel = { efectivo:'💵 Efectivo', debito:'💳 Débito', credito:'💳 Crédito' };
+
+  return (
+    <div style={{paddingBottom:80}}>
+      <Header titulo="📊 Resumen financiero" />
+
+      {/* Selector período */}
+      <div style={{display:'flex',background:'var(--beige)',borderRadius:12,margin:'10px 16px 0',padding:4,gap:4}}>
+        {PERIODOS.map(([k,l])=>(
+          <button key={k} onClick={()=>setPeriodo(k)} style={{flex:1,border:'none',cursor:'pointer',borderRadius:9,padding:'8px 4px',background:periodo===k?'var(--chocolate)':'transparent',color:periodo===k?'var(--crema)':'var(--texto2)',fontWeight:periodo===k?700:500,fontSize:13,transition:'all .15s'}}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {cargando && <p style={{textAlign:'center',padding:40,color:'var(--texto2)'}}>Cargando...</p>}
+
+      {!cargando && (
+        <div style={{padding:'12px 16px'}}>
+
+          {pedidosFiltrados.length===0 && (
+            <div style={{textAlign:'center',padding:'40px 0',color:'var(--texto2)'}}>
+              <div style={{fontSize:40,marginBottom:8}}>📭</div>
+              <p>Sin ventas en este período</p>
+            </div>
+          )}
+
+          {pedidosFiltrados.length>0 && <>
+
+            {/* ── Cards resumen ── */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+              <div style={{background:'var(--superficie)',border:'1px solid var(--beige)',borderRadius:12,padding:'12px 14px'}}>
+                <div style={{fontSize:11,color:'var(--texto2)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:4}}>Ventas</div>
+                <div style={{fontSize:22,fontWeight:700,color:'var(--chocolate)'}}>{fmt(totalVentas)}</div>
+                <div style={{fontSize:11,color:'var(--texto2)',marginTop:2}}>{pedidosFiltrados.length} pedido{pedidosFiltrados.length!==1?'s':''}</div>
+              </div>
+              {periodo==='hoy' && (
+                <div style={{background:'var(--superficie)',border:'1px solid var(--beige)',borderRadius:12,padding:'12px 14px'}}>
+                  <div style={{fontSize:11,color:'var(--texto2)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:4}}>Costo producción</div>
+                  <div style={{fontSize:22,fontWeight:700,color:'var(--cacao)'}}>{fmt(costoProd)}</div>
+                  <div style={{fontSize:11,color:'var(--texto2)',marginTop:2}}>materia prima</div>
+                </div>
+              )}
+              {periodo==='hoy' && (
+                <div style={{background: ganancia>=0?'rgba(39,174,96,0.08)':'rgba(192,57,43,0.06)',border:`1px solid ${ganancia>=0?'rgba(39,174,96,0.3)':'rgba(192,57,43,0.3)'}`,borderRadius:12,padding:'12px 14px'}}>
+                  <div style={{fontSize:11,color:'var(--texto2)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:4}}>Ganancia</div>
+                  <div style={{fontSize:22,fontWeight:700,color:ganancia>=0?'var(--verde)':'var(--rojo)'}}>{fmt(ganancia)}</div>
+                  <div style={{fontSize:11,color:ganancia>=0?'var(--verde)':'var(--rojo)',marginTop:2,fontWeight:600}}>{margenPct}% de margen</div>
+                </div>
+              )}
+              <div style={{background:'var(--superficie)',border:'1px solid var(--beige)',borderRadius:12,padding:'12px 14px'}}>
+                <div style={{fontSize:11,color:'var(--texto2)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:4}}>Ticket promedio</div>
+                <div style={{fontSize:22,fontWeight:700,color:'var(--chocolate)'}}>{fmt(pedidosFiltrados.length?totalVentas/pedidosFiltrados.length:0)}</div>
+                <div style={{fontSize:11,color:'var(--texto2)',marginTop:2}}>por pedido</div>
+              </div>
+            </div>
+
+            {/* ── Formas de pago ── */}
+            <p style={{fontSize:11,fontWeight:700,color:'var(--texto2)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8}}>Formas de pago</p>
+            <div style={{background:'var(--superficie)',border:'1px solid var(--beige)',borderRadius:12,overflow:'hidden',marginBottom:16}}>
+              {Object.entries(pagoLabel).map(([k,l])=> porPago[k]>0 && (
+                <div key={k} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 14px',borderBottom:'1px solid var(--beige)'}}>
+                  <span style={{fontSize:13,color:'var(--texto)'}}>{l}</span>
+                  <span style={{fontSize:14,fontWeight:700,color:'var(--chocolate)'}}>{fmt(porPago[k])}</span>
+                </div>
+              ))}
+              {(transferConfirmada>0||transferPendiente>0) && (
+                <div style={{padding:'10px 14px',borderBottom:'1px solid var(--beige)'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom: transferPendiente>0?6:0}}>
+                    <span style={{fontSize:13,color:'var(--texto)'}}>📱 Transferencia confirmada</span>
+                    <span style={{fontSize:14,fontWeight:700,color:'var(--verde)'}}>{fmt(transferConfirmada)}</span>
+                  </div>
+                  {transferPendiente>0 && (
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <span style={{fontSize:13,color:'var(--naranja)'}}>⏳ Transferencia pendiente</span>
+                      <span style={{fontSize:14,fontWeight:700,color:'var(--naranja)'}}>{fmt(transferPendiente)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div style={{display:'flex',justifyContent:'space-between',padding:'10px 14px',background:'var(--beige)'}}>
+                <span style={{fontSize:13,fontWeight:700,color:'var(--texto)'}}>Total cobrado</span>
+                <span style={{fontSize:14,fontWeight:700,color:'var(--chocolate)'}}>{fmt(totalVentas-transferPendiente)}</span>
+              </div>
+            </div>
+
+            {/* ── Transferencias pendientes de confirmar ── */}
+            {transferenciasPend.length>0 && (
+              <>
+                <p style={{fontSize:11,fontWeight:700,color:'var(--naranja)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8}}>⏳ Transferencias por confirmar</p>
+                <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:16}}>
+                  {transferenciasPend.map(p=>(
+                    <div key={p.id} style={{background:'rgba(230,126,34,0.07)',border:'1px solid rgba(230,126,34,0.3)',borderRadius:12,padding:'10px 14px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:600,color:'var(--texto)'}}>{p.fecha} {p.hora&&`· ${p.hora}`}</div>
+                        <div style={{fontSize:11,color:'var(--texto2)',marginTop:2}}>{(p.items||[]).map(i=>i.nombre).join(', ').slice(0,50)}</div>
+                      </div>
+                      <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:5}}>
+                        <span style={{fontSize:14,fontWeight:700,color:'var(--naranja)'}}>{fmt(p.total)}</span>
+                        <button onClick={()=>confirmarTransfer(p.id)} style={{background:'var(--verde)',color:'white',border:'none',borderRadius:8,padding:'4px 10px',cursor:'pointer',fontSize:12,fontWeight:600}}>✓ Confirmar</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* ── Por producto ── */}
+            {rankProductos.length>0 && (
+              <>
+                <p style={{fontSize:11,fontWeight:700,color:'var(--texto2)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8}}>Por producto</p>
+                <div style={{background:'var(--superficie)',border:'1px solid var(--beige)',borderRadius:12,overflow:'hidden',marginBottom:16}}>
+                  {rankProductos.map((p,idx)=>(
+                    <div key={p.nombre} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'9px 14px',borderBottom:idx<rankProductos.length-1?'1px solid var(--beige)':'none'}}>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:500,color:'var(--texto)'}}>{p.nombre}</div>
+                        <div style={{fontSize:11,color:'var(--texto2)'}}>{p.cantidad} unidad{p.cantidad!==1?'es':''}</div>
+                      </div>
+                      <div style={{textAlign:'right'}}>
+                        <div style={{fontSize:13,fontWeight:700,color:'var(--chocolate)'}}>{fmt(p.total)}</div>
+                        <div style={{fontSize:10,color:'var(--texto2)'}}>{totalVentas>0?Math.round(p.total/totalVentas*100):0}% del total</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+          </>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════
 function App() {
   const [user, setUser] = useState(undefined);
@@ -2523,6 +2827,7 @@ function App() {
     productos:     <PantallaProductos    uid={user.uid} />,
     pedidos:       <PantallaPedidos      uid={user.uid} />,
     recetas:       <PantallaRecetas      uid={user.uid} />,
+    resumen:       <PantallaResumen      uid={user.uid} ingBase={ingBase} recBase={recBase} />,
     planificacion: <PantallaPlanificacion uid={user.uid} ingBase={ingBase} recBase={recBase} />,
     ajustes:       <PantallaAjustes      onLogout={() => auth.signOut()} />,
   };
