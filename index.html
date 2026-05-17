@@ -214,6 +214,21 @@ function Campo({ label, value, onChange, placeholder, tipo = 'text', rows, child
 // ══════════════════════════════════════════════════════
 
 
+
+// ── TIPOS DE PRODUCTO ────────────────────────────────────────────────
+const TIPOS_PRODUCTO = [
+  { id:'torta',       label:'🎂 Torta',         modo:'porcionable', porcionesDefault:8  },
+  { id:'tarta',       label:'🥧 Tarta',         modo:'porcionable', porcionesDefault:8  },
+  { id:'bizcochuelo', label:'🍰 Bizcochuelo',   modo:'porcionable', porcionesDefault:8  },
+  { id:'factura',     label:'🥐 Factura',       modo:'individual',  porcionesDefault:12 },
+  { id:'bola',        label:'🍩 Bola de fraile',modo:'individual',  porcionesDefault:12 },
+  { id:'rosca',       label:'🌀 Rosca',         modo:'individual',  porcionesDefault:6  },
+  { id:'pan',         label:'🍞 Pan',           modo:'individual',  porcionesDefault:1  },
+  { id:'alfajor',     label:'🍪 Alfajor',       modo:'individual',  porcionesDefault:12 },
+  { id:'delicia',     label:'🍬 Delicia',       modo:'individual',  porcionesDefault:12 },
+];
+const getTipo = (id) => TIPOS_PRODUCTO.find(t=>t.id===id) || TIPOS_PRODUCTO[TIPOS_PRODUCTO.length-1];
+
 // ── TEMAS DE COLORES ─────────────────────────────────────────────────
 const TEMAS_DG = {
   chocolate: { nombre:'🍫 Chocolate', chocolate:'#2C1206', cacao:'#5C2E14', caramelo:'#A0622A', dorado:'#C9963C', crema:'#FBF5E6', beige:'#EDD9B0', superficie:'#FFFCF4', texto:'#1E0E04', texto2:'#6B4530' },
@@ -2107,10 +2122,12 @@ function PantallaRecetas({ uid }) {
   // ── MODAL EDITAR RECETA ───────────────────────────
   const ModalEditRec = () => {
     const isEdit = !!(modRec && modRec.id);
-    const [nombre, setNombre]   = useState(modRec ? modRec.nombre||'' : '');
-    const [emoji, setEmoji]     = useState(modRec ? modRec.emoji||'🍰' : '🍰');
-    const [desc, setDesc]       = useState(modRec ? modRec.descripcion||'' : '');
-    const [rinde, setRinde]     = useState(modRec ? modRec.rinde||'' : '');
+    const [nombre,    setNombre]   = useState(modRec ? modRec.nombre||'' : '');
+    const [emoji,     setEmoji]    = useState(modRec ? modRec.emoji||'🍰' : '🍰');
+    const [desc,      setDesc]     = useState(modRec ? modRec.descripcion||'' : '');
+    const [rinde,     setRinde]    = useState(modRec ? modRec.rinde||'' : '');
+    const [tipo,      setTipo]     = useState(modRec ? modRec.tipo||'delicia' : 'delicia');
+    const [rinde_num, setRindeNum] = useState(modRec ? modRec.rinde_num||0 : 0);
     const [checks, setChecks]   = useState(() => {
       const m = {};
       (modRec && modRec.ingredientes || []).forEach(ir => { m[ir.ingId] = ir.cantidad; });
@@ -2148,7 +2165,22 @@ function PantallaRecetas({ uid }) {
             <Campo label="Nombre de la receta" value={nombre} onChange={setNombre} placeholder="Ej: Torta de vainilla" />
           </div>
           <Campo label="Descripción corta" value={desc} onChange={setDesc} placeholder="Ej: Con ganache de chocolate" />
-          <Campo label="¿Cuánto rinde?" value={rinde} onChange={setRinde} placeholder="Ej: 12 unidades / 8 porciones" />
+          {/* Tipo de producto */}
+          <div style={{ marginBottom:12 }}>
+            <p style={{ fontSize:12, color:'var(--texto2)', marginBottom:6, fontWeight:600 }}>Tipo de producto</p>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:5 }}>
+              {TIPOS_PRODUCTO.map(t => (
+                <button key={t.id} onClick={()=>{ setTipo(t.id); if(!rinde_num) setRindeNum(t.porcionesDefault); setEmoji(t.label.split(' ')[0]); }}
+                  style={{ padding:'7px 4px', borderRadius:9, border:tipo===t.id?'2px solid var(--caramelo)':'1px solid var(--beige)', background:tipo===t.id?'var(--beige)':'none', color:'var(--texto)', fontSize:11, cursor:'pointer', fontWeight:tipo===t.id?700:400 }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Campo label={getTipo(tipo).modo==='porcionable'?'¿Cuántas porciones salen de esta receta?':'¿Cuántas unidades salen de esta receta?'}
+            value={rinde_num||''} onChange={v=>setRindeNum(Number(v))} tipo="number"
+            placeholder={String(getTipo(tipo).porcionesDefault)} />
+          <Campo label="Descripción del rendimiento (opcional)" value={rinde} onChange={setRinde} placeholder="Ej: 8 porciones generosas" />
           <label style={S.label}>✅ Ingredientes y cantidades</label>
           <div style={{ maxHeight:'32vh', overflowY:'auto', border:'1.5px solid var(--beige)', borderRadius:10, padding:'4px 12px', marginBottom:6 }}>
             {ing.map(item => {
@@ -2423,136 +2455,127 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
 function ModalOpciones({ item, ingBase, recBase, onGuardar, onCancelar }) {
   const CONV = { kg:1000, litro:1000, docena:12, unidad:1 };
 
-  // ── Calcular costo de 1 batch de esta receta ─────────────────────
-  const calcCostoReceta = () => {
+  // Costo del batch desde ingredientes
+  const costoReceta = React.useMemo(() => {
     const rec = (recBase||[]).find(r=>r.id===item.recetaId);
     if (!rec) return 0;
-    let costo = 0;
-    for (const ri of (rec.ingredientes||[])) {
+    return Math.round((rec.ingredientes||[]).reduce((s,ri)=>{
       const ing = (ingBase||[]).find(i=>i.id===ri.ingId);
-      if (!ing || !ing.precio) continue;
-      const cantCompra = ri.cantidad / (CONV[ing.unidad]||1);
-      costo += cantCompra * ing.precio;
-    }
-    return Math.round(costo);
-  };
+      if (!ing||!ing.precio) return s;
+      return s + (ri.cantidad/(CONV[ing.unidad]||1)) * ing.precio;
+    },0));
+  },[item.recetaId]);
 
-  // Margen promedio de los ingredientes de esta receta
-  const margenPromedio = () => {
+  // Margen promedio de los ingredientes
+  const margenSug = React.useMemo(() => {
     const rec = (recBase||[]).find(r=>r.id===item.recetaId);
     if (!rec) return 50;
-    const margenes = (rec.ingredientes||[]).map(ri => {
-      const ing = (ingBase||[]).find(i=>i.id===ri.ingId);
-      return ing?.margen || 0;
-    }).filter(m=>m>0);
-    if (!margenes.length) return 50;
-    return Math.round(margenes.reduce((s,m)=>s+m,0)/margenes.length);
-  };
+    const ms = (rec.ingredientes||[]).map(ri=>(ingBase||[]).find(i=>i.id===ri.ingId)?.margen||0).filter(m=>m>0);
+    return ms.length ? Math.round(ms.reduce((a,b)=>a+b,0)/ms.length) : 50;
+  },[item.recetaId]);
 
-  const costoReceta = calcCostoReceta();
-  const margenSug   = margenPromedio();
+  // Tipo de la receta para generar opciones automáticas
+  const rec = (recBase||[]).find(r=>r.id===item.recetaId);
+  const tipo = getTipo(rec?.tipo||'delicia');
+  const rindeNum = rec?.rinde_num || tipo.porcionesDefault;
 
-  // Precio recomendado = (costo / unidades) × (1 + margen%)
-  const precioRec = (unidades, margen) => {
-    if (!unidades || !costoReceta) return 0;
-    return Math.round((costoReceta / unidades) * (1 + margen/100));
-  };
+  const calcPrecio = (unidades, margen) =>
+    (unidades && costoReceta) ? Math.round((costoReceta/unidades)*(1+margen/100)) : 0;
 
-  const [opciones, setOpciones] = useState(() => {
-    if (item.opciones && item.opciones.length > 0) return item.opciones;
-    return [{ id:'o'+Date.now(), label:'Por unidad', unidades:1, margen:margenSug, precio: precioRec(1, margenSug) }];
-  });
+  // Generar opciones automáticas según tipo
+  const opcionesDefault = React.useMemo(() => {
+    if (item.opciones && item.opciones.length>0) return item.opciones;
+    if (tipo.modo==='porcionable') {
+      return [
+        { id:'o1', label:'Entera', unidades:1, margen:margenSug, precio:calcPrecio(1,margenSug), precioManual:false },
+        { id:'o2', label:'Por porción', unidades:rindeNum, margen:margenSug, precio:calcPrecio(rindeNum,margenSug), precioManual:false },
+      ];
+    }
+    return [
+      { id:'o1', label:'Por unidad', unidades:rindeNum, margen:margenSug, precio:calcPrecio(rindeNum,margenSug), precioManual:false },
+    ];
+  },[]);
 
-  const agregar = () => {
-    const op = { id:'o'+Date.now(), label:'', unidades:1, margen:margenSug, precio: precioRec(1, margenSug) };
-    setOpciones(p=>[...p, op]);
-  };
+  const [opciones, setOpciones] = useState(opcionesDefault);
 
-  const editar = (id, k, v) => {
-    setOpciones(prev => prev.map(o => {
-      if (o.id !== id) return o;
-      const updated = {...o, [k]: v};
-      // Recalcular precio recomendado si cambia unidades o margen
-      if (k==='unidades' || k==='margen') {
-        updated.precioRec = precioRec(Number(updated.unidades)||1, Number(updated.margen)||0);
-        // Solo actualizar precio automáticamente si no fue editado manualmente
-        if (!updated.precioManual) updated.precio = updated.precioRec;
-      }
-      if (k==='precio') updated.precioManual = true;
-      return updated;
-    }));
-  };
+  const editar = (id,k,v) => setOpciones(prev=>prev.map(o=>{
+    if(o.id!==id) return o;
+    const u = {...o,[k]:v};
+    if(k==='unidades'||k==='margen'){
+      u.precioRec = calcPrecio(Number(u.unidades)||1, Number(u.margen)||0);
+      if(!u.precioManual) u.precio = u.precioRec;
+    }
+    if(k==='precio') u.precioManual=true;
+    return u;
+  }));
 
-  const resetPrecio = (id) => {
-    setOpciones(prev => prev.map(o => {
-      if (o.id !== id) return o;
-      const rec = precioRec(Number(o.unidades)||1, Number(o.margen)||0);
-      return {...o, precio: rec, precioRec: rec, precioManual: false};
-    }));
-  };
+  const resetPrecio = (id) => setOpciones(prev=>prev.map(o=>{
+    if(o.id!==id) return o;
+    const p = calcPrecio(Number(o.unidades)||1,Number(o.margen)||0);
+    return {...o,precio:p,precioManual:false};
+  }));
 
-  const quitar = (id) => setOpciones(p=>p.filter(o=>o.id!==id));
+  const agregar = () => setOpciones(p=>[...p,{id:'o'+Date.now(),label:'',unidades:1,margen:margenSug,precio:calcPrecio(1,margenSug),precioManual:false}]);
+  const quitar  = (id) => setOpciones(p=>p.filter(o=>o.id!==id));
 
   return (
-    <div style={{ paddingBottom:80 }}>
+    <div style={{paddingBottom:80}}>
       <Header titulo={`💰 ${item.recetaEmoji||'🍰'} ${item.recetaNombre}`} onBack={onCancelar} />
-      <div style={{ padding:'16px' }}>
+      <div style={{padding:'16px'}}>
 
-        {/* Info de costo */}
-        <div style={{ background:'var(--beige)', borderRadius:12, padding:'12px 14px', marginBottom:16 }}>
-          <p style={{ fontSize:12, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:6 }}>Costo de esta receta</p>
-          <div style={{ display:'flex', justifyContent:'space-between' }}>
-            <span style={{ fontSize:13, color:'var(--texto)' }}>Materia prima (1 batch)</span>
-            <span style={{ fontSize:15, fontWeight:700, color:'var(--chocolate)' }}>${costoReceta.toLocaleString('es-AR')}</span>
+        {/* Resumen de costo */}
+        <div style={{background:'var(--beige)',borderRadius:12,padding:'12px 14px',marginBottom:14}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+            <span style={{fontSize:13,color:'var(--texto)'}}>Costo materia prima (1 batch)</span>
+            <span style={{fontSize:16,fontWeight:700,color:'var(--chocolate)'}}>${costoReceta.toLocaleString('es-AR')}</span>
           </div>
-          {costoReceta===0 && <p style={{ fontSize:11, color:'var(--naranja)', marginTop:4 }}>⚠️ Sin costo calculado — cargá los precios en Stock</p>}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span style={{fontSize:12,color:'var(--texto2)'}}>{tipo.label} · {rindeNum} {tipo.modo==='porcionable'?'porciones':'unidades'}</span>
+            <span style={{fontSize:11,color:'var(--verde)',fontWeight:600}}>Margen sugerido: {margenSug}%</span>
+          </div>
+          {costoReceta===0&&<p style={{fontSize:11,color:'var(--naranja)',marginTop:4}}>⚠️ Sin costo — cargá los precios en Stock</p>}
         </div>
 
-        <p style={{ fontSize:12, fontWeight:600, color:'var(--texto2)', marginBottom:12 }}>
-          Definí las opciones de venta. El precio recomendado se calcula automáticamente con el margen del Stock — podés modificarlo.
+        <p style={{fontSize:12,color:'var(--texto2)',marginBottom:12}}>
+          Precios calculados automáticamente. Podés ajustarlos si querés.
         </p>
 
-        {opciones.map((op) => {
-          const rec = precioRec(Number(op.unidades)||1, Number(op.margen)||0);
-          return (
-            <div key={op.id} style={{ background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:12, padding:'12px 14px', marginBottom:10 }}>
-              <div style={{ display:'flex', gap:8, marginBottom:8, alignItems:'center' }}>
+        {opciones.map(op=>{
+          const recP = calcPrecio(Number(op.unidades)||1,Number(op.margen)||0);
+          return(
+            <div key={op.id} style={{background:'var(--superficie)',border:'1px solid var(--beige)',borderRadius:12,padding:'12px 14px',marginBottom:10}}>
+              <div style={{display:'flex',gap:8,marginBottom:10,alignItems:'center'}}>
                 <input value={op.label} onChange={e=>editar(op.id,'label',e.target.value)}
-                  placeholder="Ej: Por porción / Entera / Promo docena"
-                  style={{ flex:1, ...S.inp }} />
-                {opciones.length>1 && (
-                  <button onClick={()=>quitar(op.id)} style={{ color:'var(--rojo)', background:'none', border:'none', cursor:'pointer', fontSize:18 }}>✕</button>
-                )}
+                  placeholder="Ej: Por porción / Entera" style={{flex:1,...S.inp}}/>
+                {opciones.length>1&&<button onClick={()=>quitar(op.id)} style={{color:'var(--rojo)',background:'none',border:'none',cursor:'pointer',fontSize:18}}>✕</button>}
               </div>
-
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
                 <div>
-                  <p style={{ fontSize:11, color:'var(--texto2)', marginBottom:4 }}>Unidades por batch</p>
+                  <p style={{fontSize:11,color:'var(--texto2)',marginBottom:4}}>{tipo.modo==='porcionable'?'Porciones/unidades':'Unidades que salen'}</p>
                   <input type="number" value={op.unidades||''} onChange={e=>editar(op.id,'unidades',Number(e.target.value))}
-                    placeholder="Ej: 10 porciones" style={{ ...S.inp, width:'100%' }} />
+                    style={{...S.inp,width:'100%'}} placeholder={String(rindeNum)}/>
                 </div>
                 <div>
-                  <p style={{ fontSize:11, color:'var(--texto2)', marginBottom:4 }}>Margen (%)</p>
+                  <p style={{fontSize:11,color:'var(--texto2)',marginBottom:4}}>Margen (%)</p>
                   <input type="number" value={op.margen||''} onChange={e=>editar(op.id,'margen',Number(e.target.value))}
-                    placeholder={String(margenSug)} style={{ ...S.inp, width:'100%' }} />
+                    style={{...S.inp,width:'100%'}} placeholder={String(margenSug)}/>
                 </div>
               </div>
-
-              <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                <div style={{ flex:1 }}>
-                  <p style={{ fontSize:11, color:'var(--texto2)', marginBottom:4 }}>
-                    Precio de venta {op.precioManual ? <span style={{color:'var(--naranja)'}}>· editado manualmente</span> : <span style={{color:'var(--verde)'}}>· recomendado ${rec.toLocaleString('es-AR')}</span>}
+              <div style={{display:'flex',gap:8,alignItems:'flex-end'}}>
+                <div style={{flex:1}}>
+                  <p style={{fontSize:11,color:op.precioManual?'var(--naranja)':'var(--verde)',marginBottom:4,fontWeight:600}}>
+                    {op.precioManual?'✏️ Editado — recomendado $'+recP.toLocaleString('es-AR'):'✅ Precio recomendado'}
                   </p>
-                  <div style={{ display:'flex', alignItems:'center', border:'1px solid var(--caramelo)', borderRadius:10, overflow:'hidden' }}>
-                    <span style={{ padding:'0 10px', color:'var(--texto2)', fontSize:14 }}>$</span>
+                  <div style={{display:'flex',alignItems:'center',border:'2px solid var(--caramelo)',borderRadius:10,overflow:'hidden'}}>
+                    <span style={{padding:'0 10px',color:'var(--texto2)',fontSize:14}}>$</span>
                     <input type="number" value={op.precio||''} onChange={e=>editar(op.id,'precio',Number(e.target.value))}
-                      style={{ border:'none', outline:'none', padding:'10px 6px 10px 0', width:'100%', background:'var(--superficie)', color:'var(--texto)', fontSize:15, fontWeight:700 }} />
+                      style={{border:'none',outline:'none',padding:'10px 6px 10px 0',width:'100%',background:'var(--superficie)',color:'var(--texto)',fontSize:16,fontWeight:700}}/>
                   </div>
                 </div>
-                {op.precioManual && (
-                  <button onClick={()=>resetPrecio(op.id)} title="Volver al precio recomendado"
-                    style={{ marginTop:20, padding:'8px 10px', borderRadius:10, border:'1px solid var(--beige2)', background:'none', color:'var(--caramelo)', cursor:'pointer', fontSize:12, whiteSpace:'nowrap' }}>
-                    ↺ Rec.
+                {op.precioManual&&(
+                  <button onClick={()=>resetPrecio(op.id)}
+                    style={{padding:'10px 12px',borderRadius:10,border:'1px solid var(--beige2)',background:'none',color:'var(--caramelo)',cursor:'pointer',fontSize:12,whiteSpace:'nowrap',marginBottom:1}}>
+                    ↺ Auto
                   </button>
                 )}
               </div>
@@ -2560,10 +2583,10 @@ function ModalOpciones({ item, ingBase, recBase, onGuardar, onCancelar }) {
           );
         })}
 
-        <button onClick={agregar} style={{ ...S.btn, width:'100%', marginBottom:12 }}>+ Agregar otra opción</button>
-        <button onClick={()=>onGuardar(opciones)} disabled={!opciones.some(o=>o.precio>0)}
-          style={{ ...S.btnPrimario, width:'100%', opacity:opciones.some(o=>o.precio>0)?1:0.5 }}>
-          Guardar precios ✓
+        <button onClick={agregar} style={{...S.btn,width:'100%',marginBottom:12}}>+ Otra opción de venta</button>
+        <button onClick={()=>onGuardar(opciones)} disabled={!opciones.some(o=>Number(o.precio)>0)}
+          style={{...S.btnPrimario,width:'100%',opacity:opciones.some(o=>Number(o.precio)>0)?1:0.5}}>
+          ✓ Confirmar precios
         </button>
       </div>
     </div>
