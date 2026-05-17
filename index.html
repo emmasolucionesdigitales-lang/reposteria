@@ -2259,17 +2259,47 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
     return { ing, disponible };
   };
 
+  const [sinPrecio, setSinPrecio] = useState(null);
+
   const guardar = async () => {
+    // 1. Verificar precios en todos los items
+    const falta = planItems.find(i => !i.opciones || !i.opciones.some(o=>Number(o.precio)>0));
+    if (falta) {
+      setSinPrecio(falta.recetaId);
+      setEditOpciones(falta.recetaId); // abrir modal de precios
+      return;
+    }
+    setSinPrecio(null);
+
+    // 2. Acumular con producción existente del día
+    const snap = await db.collection(`reposteria/${uid}/planificacion`).doc(hoy()).get();
+    const existentes = snap.exists ? (snap.data().items||[]) : [];
+
+    const acumulado = [...existentes];
+    for (const nuevo of planItems) {
+      const idx = acumulado.findIndex(e=>e.recetaId===nuevo.recetaId);
+      if (idx >= 0) {
+        // Sumar cantidad y conservar opciones más recientes
+        acumulado[idx] = { ...acumulado[idx], cantidad: acumulado[idx].cantidad + nuevo.cantidad, opciones: nuevo.opciones };
+      } else {
+        acumulado.push(nuevo);
+      }
+    }
+
+    // 3. Guardar acumulado
     await db.collection(`reposteria/${uid}/planificacion`).doc(hoy())
-      .set({ fecha: hoy(), items: planItems });
+      .set({ fecha: hoy(), items: acumulado });
+
+    // 4. Limpiar el formulario para una nueva producción
+    setPlanItems([]);
     setGuardado(true);
-    setTimeout(() => setGuardado(false), 3000);
+    setTimeout(() => setGuardado(false), 4000);
   };
 
   // ── Modal opciones de venta ────────────────────────────────────────
   if (editOpciones !== null) {
     const item = planItems.find(i=>i.recetaId===editOpciones);
-    return <ModalOpciones item={item} onGuardar={ops=>guardarOpciones(editOpciones,ops)} onCancelar={()=>setEditOpciones(null)} />;
+    return <ModalOpciones item={item} ingBase={ingBase} recBase={recBase} onGuardar={ops=>guardarOpciones(editOpciones,ops)} onCancelar={()=>setEditOpciones(null)} />;
   }
 
   const hayPlan = planItems.length > 0;
@@ -2377,7 +2407,7 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
           </div>
         )}
 
-        {guardado && <div style={{ background:'#d4edda', color:'#155724', borderRadius:10, padding:'10px', textAlign:'center', marginBottom:12, fontSize:13 }}>✅ Planificación guardada — Productos actualizados</div>}
+        {guardado && <div style={{ background:'#d4edda', color:'#155724', borderRadius:10, padding:'10px', textAlign:'center', marginBottom:12, fontSize:13 }}>✅ Producción guardada y sumada al día — Formulario listo para nueva producción</div>}
 
         <button onClick={guardar} disabled={!hayPlan}
           style={{ ...S.btnPrimario, width:'100%', opacity:hayPlan?1:0.4 }}>
@@ -2390,38 +2420,151 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
 }
 
 // ── Modal para definir opciones de venta de un producto planificado ──
-function ModalOpciones({ item, onGuardar, onCancelar }) {
-  const [opciones, setOpciones] = useState(
-    item.opciones && item.opciones.length > 0
-      ? item.opciones
-      : [{ id:'o'+Date.now(), label:'Por unidad', precio:0 }]
-  );
-  const agregar = () => setOpciones(p=>[...p,{id:'o'+Date.now(),label:'',precio:0}]);
-  const editar  = (id,k,v) => setOpciones(p=>p.map(o=>o.id===id?{...o,[k]:v}:o));
-  const quitar  = (id) => setOpciones(p=>p.filter(o=>o.id!==id));
+function ModalOpciones({ item, ingBase, recBase, onGuardar, onCancelar }) {
+  const CONV = { kg:1000, litro:1000, docena:12, unidad:1 };
+
+  // ── Calcular costo de 1 batch de esta receta ─────────────────────
+  const calcCostoReceta = () => {
+    const rec = (recBase||[]).find(r=>r.id===item.recetaId);
+    if (!rec) return 0;
+    let costo = 0;
+    for (const ri of (rec.ingredientes||[])) {
+      const ing = (ingBase||[]).find(i=>i.id===ri.ingId);
+      if (!ing || !ing.precio) continue;
+      const cantCompra = ri.cantidad / (CONV[ing.unidad]||1);
+      costo += cantCompra * ing.precio;
+    }
+    return Math.round(costo);
+  };
+
+  // Margen promedio de los ingredientes de esta receta
+  const margenPromedio = () => {
+    const rec = (recBase||[]).find(r=>r.id===item.recetaId);
+    if (!rec) return 50;
+    const margenes = (rec.ingredientes||[]).map(ri => {
+      const ing = (ingBase||[]).find(i=>i.id===ri.ingId);
+      return ing?.margen || 0;
+    }).filter(m=>m>0);
+    if (!margenes.length) return 50;
+    return Math.round(margenes.reduce((s,m)=>s+m,0)/margenes.length);
+  };
+
+  const costoReceta = calcCostoReceta();
+  const margenSug   = margenPromedio();
+
+  // Precio recomendado = (costo / unidades) × (1 + margen%)
+  const precioRec = (unidades, margen) => {
+    if (!unidades || !costoReceta) return 0;
+    return Math.round((costoReceta / unidades) * (1 + margen/100));
+  };
+
+  const [opciones, setOpciones] = useState(() => {
+    if (item.opciones && item.opciones.length > 0) return item.opciones;
+    return [{ id:'o'+Date.now(), label:'Por unidad', unidades:1, margen:margenSug, precio: precioRec(1, margenSug) }];
+  });
+
+  const agregar = () => {
+    const op = { id:'o'+Date.now(), label:'', unidades:1, margen:margenSug, precio: precioRec(1, margenSug) };
+    setOpciones(p=>[...p, op]);
+  };
+
+  const editar = (id, k, v) => {
+    setOpciones(prev => prev.map(o => {
+      if (o.id !== id) return o;
+      const updated = {...o, [k]: v};
+      // Recalcular precio recomendado si cambia unidades o margen
+      if (k==='unidades' || k==='margen') {
+        updated.precioRec = precioRec(Number(updated.unidades)||1, Number(updated.margen)||0);
+        // Solo actualizar precio automáticamente si no fue editado manualmente
+        if (!updated.precioManual) updated.precio = updated.precioRec;
+      }
+      if (k==='precio') updated.precioManual = true;
+      return updated;
+    }));
+  };
+
+  const resetPrecio = (id) => {
+    setOpciones(prev => prev.map(o => {
+      if (o.id !== id) return o;
+      const rec = precioRec(Number(o.unidades)||1, Number(o.margen)||0);
+      return {...o, precio: rec, precioRec: rec, precioManual: false};
+    }));
+  };
+
+  const quitar = (id) => setOpciones(p=>p.filter(o=>o.id!==id));
 
   return (
     <div style={{ paddingBottom:80 }}>
-      <Header titulo={`💰 ${item.recetaEmoji} ${item.recetaNombre}`} onBack={onCancelar} />
+      <Header titulo={`💰 ${item.recetaEmoji||'🍰'} ${item.recetaNombre}`} onBack={onCancelar} />
       <div style={{ padding:'16px' }}>
-        <p style={{ color:'var(--texto2)', fontSize:13, marginBottom:16 }}>Definí cómo vas a vender este producto hoy. Podés tener varias opciones (por porción, entero, promo docena, etc.)</p>
-        {opciones.map((op,idx) => (
-          <div key={op.id} style={{ display:'flex', gap:8, marginBottom:10, alignItems:'center' }}>
-            <input value={op.label} onChange={e=>editar(op.id,'label',e.target.value)}
-              placeholder="Ej: Por porción / Entera / Promo docena"
-              style={{ flex:2, ...S.inp }} />
-            <div style={{ display:'flex', alignItems:'center', border:'1px solid var(--beige)', borderRadius:10, overflow:'hidden', flex:1 }}>
-              <span style={{ padding:'0 8px', color:'var(--texto2)', fontSize:13 }}>$</span>
-              <input type="number" value={op.precio||''} onChange={e=>editar(op.id,'precio',Number(e.target.value))}
-                placeholder="0" style={{ border:'none', outline:'none', padding:'10px 6px 10px 0', width:'100%', background:'var(--superficie)', color:'var(--texto)', fontSize:14 }} />
-            </div>
-            {opciones.length > 1 && (
-              <button onClick={()=>quitar(op.id)} style={{ color:'var(--rojo)', background:'none', border:'none', cursor:'pointer', fontSize:18, padding:'0 4px' }}>✕</button>
-            )}
+
+        {/* Info de costo */}
+        <div style={{ background:'var(--beige)', borderRadius:12, padding:'12px 14px', marginBottom:16 }}>
+          <p style={{ fontSize:12, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:6 }}>Costo de esta receta</p>
+          <div style={{ display:'flex', justifyContent:'space-between' }}>
+            <span style={{ fontSize:13, color:'var(--texto)' }}>Materia prima (1 batch)</span>
+            <span style={{ fontSize:15, fontWeight:700, color:'var(--chocolate)' }}>${costoReceta.toLocaleString('es-AR')}</span>
           </div>
-        ))}
-        <button onClick={agregar} style={{ ...S.btn, width:'100%', marginBottom:16 }}>+ Agregar otra opción</button>
-        <button onClick={()=>onGuardar(opciones)} style={{ ...S.btnPrimario, width:'100%' }}>Guardar precios</button>
+          {costoReceta===0 && <p style={{ fontSize:11, color:'var(--naranja)', marginTop:4 }}>⚠️ Sin costo calculado — cargá los precios en Stock</p>}
+        </div>
+
+        <p style={{ fontSize:12, fontWeight:600, color:'var(--texto2)', marginBottom:12 }}>
+          Definí las opciones de venta. El precio recomendado se calcula automáticamente con el margen del Stock — podés modificarlo.
+        </p>
+
+        {opciones.map((op) => {
+          const rec = precioRec(Number(op.unidades)||1, Number(op.margen)||0);
+          return (
+            <div key={op.id} style={{ background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:12, padding:'12px 14px', marginBottom:10 }}>
+              <div style={{ display:'flex', gap:8, marginBottom:8, alignItems:'center' }}>
+                <input value={op.label} onChange={e=>editar(op.id,'label',e.target.value)}
+                  placeholder="Ej: Por porción / Entera / Promo docena"
+                  style={{ flex:1, ...S.inp }} />
+                {opciones.length>1 && (
+                  <button onClick={()=>quitar(op.id)} style={{ color:'var(--rojo)', background:'none', border:'none', cursor:'pointer', fontSize:18 }}>✕</button>
+                )}
+              </div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
+                <div>
+                  <p style={{ fontSize:11, color:'var(--texto2)', marginBottom:4 }}>Unidades por batch</p>
+                  <input type="number" value={op.unidades||''} onChange={e=>editar(op.id,'unidades',Number(e.target.value))}
+                    placeholder="Ej: 10 porciones" style={{ ...S.inp, width:'100%' }} />
+                </div>
+                <div>
+                  <p style={{ fontSize:11, color:'var(--texto2)', marginBottom:4 }}>Margen (%)</p>
+                  <input type="number" value={op.margen||''} onChange={e=>editar(op.id,'margen',Number(e.target.value))}
+                    placeholder={String(margenSug)} style={{ ...S.inp, width:'100%' }} />
+                </div>
+              </div>
+
+              <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                <div style={{ flex:1 }}>
+                  <p style={{ fontSize:11, color:'var(--texto2)', marginBottom:4 }}>
+                    Precio de venta {op.precioManual ? <span style={{color:'var(--naranja)'}}>· editado manualmente</span> : <span style={{color:'var(--verde)'}}>· recomendado ${rec.toLocaleString('es-AR')}</span>}
+                  </p>
+                  <div style={{ display:'flex', alignItems:'center', border:'1px solid var(--caramelo)', borderRadius:10, overflow:'hidden' }}>
+                    <span style={{ padding:'0 10px', color:'var(--texto2)', fontSize:14 }}>$</span>
+                    <input type="number" value={op.precio||''} onChange={e=>editar(op.id,'precio',Number(e.target.value))}
+                      style={{ border:'none', outline:'none', padding:'10px 6px 10px 0', width:'100%', background:'var(--superficie)', color:'var(--texto)', fontSize:15, fontWeight:700 }} />
+                  </div>
+                </div>
+                {op.precioManual && (
+                  <button onClick={()=>resetPrecio(op.id)} title="Volver al precio recomendado"
+                    style={{ marginTop:20, padding:'8px 10px', borderRadius:10, border:'1px solid var(--beige2)', background:'none', color:'var(--caramelo)', cursor:'pointer', fontSize:12, whiteSpace:'nowrap' }}>
+                    ↺ Rec.
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        <button onClick={agregar} style={{ ...S.btn, width:'100%', marginBottom:12 }}>+ Agregar otra opción</button>
+        <button onClick={()=>onGuardar(opciones)} disabled={!opciones.some(o=>o.precio>0)}
+          style={{ ...S.btnPrimario, width:'100%', opacity:opciones.some(o=>o.precio>0)?1:0.5 }}>
+          Guardar precios ✓
+        </button>
       </div>
     </div>
   );
