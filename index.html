@@ -2143,7 +2143,7 @@ function App() {
     historial:    <PantallaHistorial   uid={user.uid} />,
     presupuestos: <PantallaPresupuestos uid={user.uid} />,
     recetas:      <PantallaRecetas uid={user.uid} />,
-    ajustes:      <PantallaAjustes onLogout={logout} />,
+    ajustes:      <PantallaAjustes onLogout={() => auth.signOut()} />,
   };
 
   return (
