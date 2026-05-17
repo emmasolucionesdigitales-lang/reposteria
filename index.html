@@ -1794,10 +1794,10 @@ function PantallaRecetas({ uid }) {
         await db.collection(`reposteria/${uid}/stock`).doc(s.id).update({ cantidad: nueva });
       } else {
         // Crear en Firestore si no existe
-        const ing = ing.find(i=>i.nombre===nombre);
+        const ingRef = ing.find(i=>i.nombre===nombre);
         await db.collection(`reposteria/${uid}/stock`).add({
           nombre, cantidad: Math.max(0, delta),
-          unidad: ing?.unidad||'kg', stockMinimo: 0, costoUnitario: 0
+          unidad: ingRef?.unidad||'kg', stockMinimo: 0, costoUnitario: 0
         });
       }
     };
