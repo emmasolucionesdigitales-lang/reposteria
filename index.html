@@ -138,6 +138,20 @@ const firebaseConfig = {
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const db   = firebase.firestore();
 const auth = firebase.auth();
+// Auth anónima para que las reglas de Firestore funcionen
+auth.signInAnonymously().catch(function(){});
+
+// Licencias — app-control-de-apps
+var reposLicApp = firebase.apps.find(function(a){return a.name==="licencias";}) ||
+  firebase.initializeApp({
+    apiKey:"AIzaSyAFQ4ybqIoVV3rWe1FMjMVUZ-qzLNZbdBk",
+    authDomain:"app-control-de-apps.firebaseapp.com",
+    projectId:"app-control-de-apps",
+    storageBucket:"app-control-de-apps.firebasestorage.app",
+    messagingSenderId:"761424199819",
+    appId:"1:761424199819:web:513eeaf0e54f4e1401d48e"
+  },"licencias");
+window.dbLicencias = firebase.firestore(reposLicApp);
 
 // ══════════════════════════════════════════════════════
 // HELPERS
@@ -470,23 +484,119 @@ function BtnDark(){
   </button>;
 }
 
-function Login() {
+// ── Sistema de activación por código + PIN ────────────────────────
+function getDeviceIdRepos() {
+  let id = localStorage.getItem("repos_device_id");
+  if(!id){ id="dev_"+Math.random().toString(36).slice(2)+Date.now().toString(36); localStorage.setItem("repos_device_id",id); }
+  return id;
+}
+function getLicenciaRepos() {
+  try { return JSON.parse(localStorage.getItem("repos_licencia")||"null"); } catch { return null; }
+}
 
-  const [email, setEmail]     = useState('');
-  const [pass, setPass]       = useState('');
-  const [error, setError]     = useState('');
-  const [cargando, setCarga]  = useState(false);
+function PantallaActivacionRepos({onActivado}) {
+  const [codigo, setCodigo]   = useState("");
+  const [celular, setCelular] = useState("");
+  const [email, setEmail]     = useState("");
+  const [negocio, setNegocio] = useState("");
+  const [paso, setPaso]       = useState(1);
+  const [error, setError]     = useState("");
+  const [cargando, setCargando] = useState(false);
 
-  const ingresar = async () => {
-    if (!email || !pass) return setError('Completá los dos campos');
-    setCarga(true); setError('');
+  const verificarCodigo = async () => {
+    if(!codigo.trim()){ setError("Ingresá el código de activación"); return; }
+    setCargando(true); setError("");
     try {
-      await auth.signInWithEmailAndPassword(email, pass);
-    } catch {
-      setError('Email o contraseña incorrectos');
-      setCarga(false);
-    }
+      const doc = await window.dbLicencias.collection("licencias").doc(codigo.trim().toUpperCase()).get();
+      if(!doc.exists){ setError("Código inválido."); setCargando(false); return; }
+      const lic = doc.data();
+      if(lic.app && lic.app!=="reposteria"){ setError("Este código no es para Dulce Gestión."); setCargando(false); return; }
+      if(lic.estado==="inactivo"){ setError("Licencia desactivada. Contactá al soporte."); setCargando(false); return; }
+      if(lic.estado==="usado"&&lic.deviceId&&lic.deviceId!==getDeviceIdRepos()){ setError("Código ya usado en otro dispositivo."); setCargando(false); return; }
+      setPaso(2);
+    } catch(e){ setError("Error de conexión."); }
+    setCargando(false);
   };
+
+  const completarActivacion = async () => {
+    if(!celular.trim()||!email.trim()||!negocio.trim()){ setError("Completá todos los campos"); return; }
+    setCargando(true); setError("");
+    try {
+      const cod = codigo.trim().toUpperCase();
+      const deviceId = getDeviceIdRepos();
+      const snap = await window.dbLicencias.collection("licencias").doc(cod).get();
+      const lic = snap.data();
+      await window.dbLicencias.collection("licencias").doc(cod).update({
+        estado:"usado", deviceId, celular:celular.trim(), email:email.trim(),
+        negocio:negocio.trim(), activadoEn:new Date().toISOString()
+      });
+      const licObj = {codigo:cod, pin:lic.pin, email:email.trim(), celular:celular.trim(), negocio:negocio.trim(), deviceId, activado:true};
+      localStorage.setItem("repos_licencia", JSON.stringify(licObj));
+      onActivado(lic.pin);
+    } catch(e){ setError("Error al activar."); }
+    setCargando(false);
+  };
+
+  return (
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,background:"var(--crema)",gap:16}}>
+      <div style={{fontSize:56}}>🍰</div>
+      <h1 style={{fontFamily:"Playfair Display",fontSize:28,color:"var(--chocolate)",margin:0}}>Dulce Gestión</h1>
+      {paso===1&&<>
+        <p style={{fontSize:14,color:"var(--texto2)",textAlign:"center",maxWidth:280}}>Ingresá el código de activación que recibiste.</p>
+        <input style={{...S.input,textAlign:"center",fontSize:18,letterSpacing:3,textTransform:"uppercase",maxWidth:300,width:"100%"}} placeholder="REPOS-XXXX" value={codigo} onChange={e=>setCodigo(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&verificarCodigo()} />
+        {error&&<p style={{color:"var(--rojo)",fontSize:13}}>{error}</p>}
+        <button style={{...S.btnPrimario,width:200,opacity:cargando?0.6:1}} disabled={cargando} onClick={verificarCodigo}>{cargando?"Verificando...":"Continuar →"}</button>
+      </>}
+      {paso===2&&<>
+        <p style={{fontSize:14,color:"var(--texto2)",textAlign:"center",maxWidth:280}}>✓ Código válido. Completá tus datos.</p>
+        <div style={{width:"100%",maxWidth:300,display:"flex",flexDirection:"column",gap:10}}>
+          <input style={S.input} placeholder="Nombre del negocio *" value={negocio} onChange={e=>setNegocio(e.target.value)} />
+          <input style={S.input} placeholder="Celular *" type="tel" value={celular} onChange={e=>setCelular(e.target.value)} />
+          <input style={S.input} placeholder="Email *" type="email" value={email} onChange={e=>setEmail(e.target.value)} />
+        </div>
+        {error&&<p style={{color:"var(--rojo)",fontSize:13}}>{error}</p>}
+        <button style={{...S.btnPrimario,width:200,opacity:cargando?0.6:1}} disabled={cargando} onClick={completarActivacion}>{cargando?"Activando...":"Activar →"}</button>
+      </>}
+    </div>
+  );
+}
+
+function PantallaPinRepos({pin, onOk}) {
+  const [intento, setIntento] = useState("");
+  const [error, setError]     = useState("");
+  const [intentos, setIntentos] = useState(0);
+  const [bloqueado, setBloqueado] = useState(false);
+  const lic = getLicenciaRepos();
+  const teclas = [1,2,3,4,5,6,7,8,9,"","0","⌫"];
+  return (
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,background:"var(--crema)"}}>
+      <div style={{fontSize:48}}>🍰</div>
+      <h2 style={{color:"var(--chocolate)",margin:0}}>{lic?.negocio||"Dulce Gestión"}</h2>
+      <p style={{color:"var(--texto2)",fontSize:14}}>Ingresá tu PIN de acceso</p>
+      <div style={{display:"flex",gap:14}}>
+        {[0,1,2,3].map(i=><div key={i} style={{width:16,height:16,borderRadius:"50%",background:intento.length>i?"var(--chocolate)":"transparent",border:"2px solid var(--chocolate)"}}/>)}
+      </div>
+      {error&&<p style={{color:"var(--rojo)",fontSize:13}}>{error}</p>}
+      {!bloqueado&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,72px)",gap:10}}>
+        {teclas.map((t,i)=><button key={i} style={{height:60,fontSize:t==="⌫"?18:20,fontWeight:500,borderRadius:12,background:t===""?"transparent":"var(--superficie)",border:t===""?"none":"1px solid rgba(0,0,0,0.1)",color:"var(--chocolate)",cursor:t===""?"default":"pointer",opacity:t===""?0:1}} onClick={()=>{
+          if(t==="")return;
+          if(t==="⌫"){setIntento(v=>v.slice(0,-1));return;}
+          if(intento.length>=4)return;
+          const nv=intento+t; setIntento(nv);
+          if(nv.length===4)setTimeout(()=>{
+            if(nv===String(pin)){setError("");onOk();}
+            else{setIntento("");setIntentos(prev=>{const n2=prev+1;if(n2>=5){setBloqueado(true);setError("Demasiados intentos.");}else setError(`PIN incorrecto (${5-n2} restante${5-n2!==1?"s":""})`);return n2;});}
+          },200);
+        }}>{t}</button>)}
+      </div>}
+    </div>
+  );
+}
+
+function Login() {
+  // Reemplazado por sistema de código+PIN
+  return null;
+}
 
   return (
     <div style={{
@@ -3296,24 +3406,16 @@ function PantallaResumen({ uid, ingBase, recBase }) {
 
 // ══════════════════════════════════════════════════════
 function App() {
-  const [user, setUser] = useState(undefined);
-  const [tab, setTab]   = useState('productos');
+  const [fase, setFase] = useState(()=>{
+    const lic = getLicenciaRepos();
+    if(!lic||!lic.activado) return "activacion";
+    return "pin";
+  });
+  const [tab, setTab] = useState('productos');
 
-  useEffect(() => {
-    return auth.onAuthStateChanged(u => setUser(u));
-  }, []);
-
-  // Cargando estado inicial de auth
-  if (user === undefined) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
-        <div style={{ fontSize: 56 }}>🍰</div>
-        <p style={{ color: 'var(--texto2)', fontSize: 15 }}>Cargando Dulce Gestión...</p>
-      </div>
-    );
-  }
-
-  if (!user) return <Login />;
+  if(fase==="activacion") return <PantallaActivacionRepos onActivado={pin=>{ setFase("pin"); }} />;
+  const lic = getLicenciaRepos();
+  if(fase==="pin") return <PantallaPinRepos pin={lic?.pin} onOk={()=>setFase("app")} />;
 
   const ingBase = ING_DEFAULT_RC;
   const recBase = REC_DEFAULT_RC;
