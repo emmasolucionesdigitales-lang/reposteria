@@ -598,43 +598,6 @@ function Login() {
   return null;
 }
 
-  return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center',
-      padding: '32px 24px', background: 'var(--crema)',
-    }}>
-      {/* Decoración fondo */}
-      <div style={{ position: 'fixed', top: -60, right: -60, width: 200, height: 200, borderRadius: '50%', background: 'rgba(169,98,42,0.08)', pointerEvents: 'none' }}/>
-      <div style={{ position: 'fixed', bottom: -40, left: -40, width: 160, height: 160, borderRadius: '50%', background: 'rgba(201,150,60,0.10)', pointerEvents: 'none' }}/>
-
-      <div style={{ fontSize: 64, marginBottom: 8 }}>🍰</div>
-      <h1 style={{ fontFamily: 'Playfair Display', fontSize: 34, color: 'var(--chocolate)', marginBottom: 4 }}>
-        Dulce Gestión
-      </h1>
-      <p style={{ color: 'var(--texto2)', marginBottom: 36, fontSize: 14 }}>Tu cocina, siempre organizada</p>
-
-      <div style={{ width: '100%', maxWidth: 340, background: 'var(--superficie)', borderRadius: 16, padding: 24, boxShadow: '0 4px 24px rgba(44,18,6,0.12)' }}>
-        {error && (
-          <div style={{ background: '#FDEDEC', color: 'var(--rojo)', padding: '10px 14px', borderRadius: 10, marginBottom: 14, fontSize: 13, fontWeight: 600 }}>
-            ⚠️ {error}
-          </div>
-        )}
-        <Campo label="Email" value={email} onChange={setEmail} placeholder="tu@email.com" tipo="email" />
-        <Campo label="Contraseña" value={pass} onChange={setPass} placeholder="••••••••" tipo="password" />
-        <button onClick={ingresar} disabled={cargando}
-          style={{ ...S.btnPrimario, width: '100%', marginTop: 18, padding: '14px', fontSize: 16, opacity: cargando ? 0.7 : 1 }}>
-          {cargando ? 'Ingresando...' : '🍫 Ingresar'}
-        </button>
-      </div>
-
-      <p style={{ marginTop: 20, fontSize: 12, color: 'var(--texto2)', textAlign: 'center' }}>
-        Creá tu cuenta en Firebase Authentication<br/>y luego ingresá con tu email y contraseña
-      </p>
-    </div>
-  );
-}
-
 // ══════════════════════════════════════════════════════
 // PANTALLA: PEDIDOS — lista
 // ══════════════════════════════════════════════════════
