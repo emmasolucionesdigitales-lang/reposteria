@@ -3382,12 +3382,13 @@ function App() {
 
   const ingBase = ING_DEFAULT_RC;
   const recBase = REC_DEFAULT_RC;
+  const uid = (getLicenciaRepos()?.deviceId) || "default";
   const pantallas = {
-    productos:     <PantallaProductos    uid={user.uid} ingBase={ingBase} recBase={recBase} />,
-    pedidos:       <PantallaPedidos      uid={user.uid} />,
-    recetas:       <PantallaRecetas      uid={user.uid} />,
-    resumen:       <PantallaResumen      uid={user.uid} ingBase={ingBase} recBase={recBase} />,
-    planificacion: <PantallaPlanificacion uid={user.uid} ingBase={ingBase} recBase={recBase} />,
+    productos:     <PantallaProductos    uid={uid} ingBase={ingBase} recBase={recBase} />,
+    pedidos:       <PantallaPedidos      uid={uid} />,
+    recetas:       <PantallaRecetas      uid={uid} />,
+    resumen:       <PantallaResumen      uid={uid} ingBase={ingBase} recBase={recBase} />,
+    planificacion: <PantallaPlanificacion uid={uid} ingBase={ingBase} recBase={recBase} />,
     ajustes:       <PantallaAjustes      onLogout={() => auth.signOut()} />,
   };
 
