@@ -502,6 +502,8 @@ function PantallaActivacionRepos({onActivado}) {
       const deviceId = getDeviceIdRepos();
       const snap = await window.dbLicencias.collection("licencias").doc(cod).get();
       const lic = snap.data();
+      if(lic.email&&lic.email.trim().toLowerCase()!==email.trim().toLowerCase()){setError("El email no coincide con el registrado. Contactá al administrador.");setCargando(false);return;}
+      if(lic.celular&&lic.celular.trim()!==celular.trim()){setError("El celular no coincide con el registrado. Contactá al administrador.");setCargando(false);return;}
       await window.dbLicencias.collection("licencias").doc(cod).update({
         estado:"usado", deviceId, celular:celular.trim(), email:email.trim(),
         negocio:negocio.trim(), activadoEn:new Date().toISOString()
