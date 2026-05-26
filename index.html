@@ -466,6 +466,53 @@ function getDeviceIdRepos() {
   if(!id){ id="dev_"+Math.random().toString(36).slice(2)+Date.now().toString(36); localStorage.setItem("repos_device_id",id); }
   return id;
 }
+
+  // ── Brevo email ─────────────────────────────────────────────────
+  var BREVO_KEY_APP = "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";
+  // ── Resumen diario ────────────────────────────────────────────────
+  window.enviarResumenDiario_repos_licencia = async function(resumen) {
+    // resumen: { fecha, totalIngresos, totalGastos, ganancia, detalle:[] }
+    const lic = (()=>{ try{ return JSON.parse(localStorage.getItem('repos_licencia')||'{}'); }catch{return{};} })();
+    if(!lic.email) return false;
+    const fmt = n => '$' + Math.round(Number(n)||0).toLocaleString('es-AR');
+    const fila = (l,v,c) => `<tr><td style="padding:7px 0;color:#555;border-bottom:1px solid #eee">${l}</td><td style="text-align:right;font-weight:600;color:${c||'#222'};border-bottom:1px solid #eee">${v}</td></tr>`;
+    const det = (resumen.detalle||[]).map(d=>fila(d.label, fmt(d.monto), d.color)).join('');
+    const html = `
+      <div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:24px;background:#f9fafb">
+        <div style="background:#d946ef;border-radius:12px 12px 0 0;padding:20px 24px">
+          <h2 style="color:#fff;margin:0;font-size:18px">📊 Resumen · Dulce Gestión</h2>
+          <p style="color:rgba(255,255,255,.7);margin:4px 0 0;font-size:13px">${lic.negocio||''} · ${resumen.fecha||''}</p>
+        </div>
+        <div style="background:#fff;border-radius:0 0 12px 12px;padding:20px 24px;box-shadow:0 2px 8px rgba(0,0,0,.08)">
+          <div style="background:#f0f7ff;border-radius:10px;padding:16px;margin-bottom:20px;text-align:center">
+            <div style="font-size:32px;font-weight:800;color:#d946ef">${fmt(resumen.totalIngresos||0)}</div>
+            <div style="color:#666;font-size:13px">Total del día</div>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:14px">
+            ${det}
+            ${resumen.ganancia!==undefined ? fila('<b>💰 Ganancia neta</b>','<b>'+fmt(resumen.ganancia)+'</b>', resumen.ganancia>=0?'#0a7c3e':'#e05c5c') : ''}
+          </table>
+        </div>
+        <p style="color:#aaa;font-size:11px;text-align:center;margin-top:16px">Emma Soluciones Digitales</p>
+      </div>`;
+    return (async ({to, toName, subject, htmlContent})=>{
+    try {
+      const res = await fetch("https://api.brevo.com/v3/smtp/email",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","api-key":BREVO_KEY_APP},
+        body:JSON.stringify({sender:{name:"Emma Soluciones Digitales",email:"carabajalponce1980@gmail.com"},to:[{email:to,name:toName||to}],subject,htmlContent})
+      });
+      return res.ok;
+    } catch(e){ console.error("Brevo:",e); return false; }
+  })({
+      to: lic.email,
+      toName: lic.negocio||'',
+      subject: `📊 Dulce Gestión · ${resumen.fecha||''} · ${fmt(resumen.totalIngresos||0)}`,
+      htmlContent: html
+    });
+  };
+
+
 function getLicenciaRepos() {
   try { return JSON.parse(localStorage.getItem("repos_licencia")||"null"); } catch { return null; }
 }
@@ -2907,6 +2954,32 @@ function PantallaProductos({ uid, ingBase, recBase }) {
       await db.collection('reposteria/' + uid + '/planificacion').doc(hoy()).update({ items, cerrado:true });
     }
     alert('Producción del día cerrada. Pérdida registrada en el Resumen.');
+    // ── Enviar resumen por email ──
+    if(window.enviarResumenDiario_repos_licencia){
+      const ventasHoy = await db.collection('reposteria/' + uid + '/pedidos')
+        .where('fecha','==',hoy()).get()
+        .then(s=>s.docs.map(d=>d.data())).catch(()=>[]);
+      const totalV = ventasHoy.reduce((a,p)=>a+(p.total||0),0);
+      const totalCosto = itemsConSobrante.reduce((a,i)=>{
+        const c=i.opciones&&i.opciones[0]?i.opciones[0].precio/(1+(i.opciones[0].margen||50)/100):0;
+        return a+Math.round(c*(i.disponible||0));
+      },0);
+      const detDet = itemsConSobrante.map(i=>({
+        label:(i.recetaEmoji||'🍰')+' '+i.nombre+' (sobrante)',
+        monto:-Math.round((i.opciones&&i.opciones[0]?i.opciones[0].precio/(1+(i.opciones[0].margen||50)/100):0)*(i.disponible||0)),
+        color:'#e05c5c'
+      }));
+      window.enviarResumenDiario_repos_licencia({
+        fecha: new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long',year:'numeric'}),
+        totalIngresos: totalV,
+        ganancia: totalV - totalCosto,
+        detalle: [
+          {label:'💰 Ventas del día',monto:totalV,color:'#d946ef'},
+          {label:'📦 Pérdida por sobrantes',monto:-perdidaTotal,color:'#e05c5c'},
+          ...detDet
+        ]
+      }).catch(()=>{});
+    }
   };
 
   const confirmar = async () => {
