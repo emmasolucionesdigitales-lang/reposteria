@@ -338,7 +338,7 @@ function _limpiarTSRepos(o){
 async function exportarRespaldoRepos(){
   try{
     const uid=_uidRepos();
-    const cols=['productos','pedidos','stock','recetas','planificacion'];
+    const cols=['productos','pedidos','stock','recetas','planificacion','caja'];
     const data={};
     for(const c of cols){
       const snap=await db.collection('reposteria/'+uid+'/'+c).get();
@@ -359,7 +359,7 @@ async function restaurarRespaldoRepos(file){
   try{obj=JSON.parse(await file.text());}catch(e){alert('El archivo no es un .json válido.');return;}
   const data=(obj&&obj.data)?obj.data:null;
   if(!data){alert('El archivo no es un respaldo de Dulce Gestion válido.');return;}
-  const cols=['productos','pedidos','stock','recetas','planificacion'];
+  const cols=['productos','pedidos','stock','recetas','planificacion','caja'];
   const total=cols.reduce((a,c)=>a+((data[c]||[]).length),0);
   if(!confirm('Esto va a SUBIR a la nube '+total+' registros del respaldo (reemplaza los que tengan el mismo código). ¿Continuar?'))return;
   try{
@@ -472,6 +472,7 @@ function PantallaAjustes({ onLogout }) {
 const TABS = [
   { id: 'productos',     icon: '🧁', label: 'Productos'  },
   { id: 'pedidos',       icon: '📋', label: 'Pedidos'    },
+  { id: 'caja',          icon: '💰', label: 'Caja'       },
   { id: 'planificacion', icon: '📐', label: 'Plan'       },
   { id: 'recetas',       icon: '🍰', label: 'Recetas'    },
   { id: 'resumen',       icon: '📊', label: 'Resumen'    },
@@ -3915,6 +3916,306 @@ function PantallaResumen({ uid, ingBase, recBase }) {
 }
 
 // ══════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+// PANTALLA: CAJA
+// Ingresos · Egresos · Señas · Saldos · Gastos · Movimientos manuales
+// Total de caja + desglose por forma de pago
+// ══════════════════════════════════════════════════════════════════════
+const CAT_CAJA = {
+  sena:   { label: 'Seña',          tipo: 'ingreso', icon: '💵' },
+  saldo:  { label: 'Saldo',         tipo: 'ingreso', icon: '💰' },
+  venta:  { label: 'Venta',         tipo: 'ingreso', icon: '🛒' },
+  ingreso:{ label: 'Otro ingreso',  tipo: 'ingreso', icon: '➕' },
+  gasto:  { label: 'Gasto/Insumo',  tipo: 'egreso',  icon: '🧾' },
+  retiro: { label: 'Retiro',        tipo: 'egreso',  icon: '➖' },
+};
+const PAGOS_CAJA = [
+  ['efectivo',      '💵 Efectivo'],
+  ['transferencia', '📱 Transfer.'],
+  ['debito',        '💳 Débito'],
+  ['credito',       '💳 Crédito'],
+];
+
+function PantallaCaja({ uid }) {
+  const [movs, setMovs]       = useState([]);
+  const [pedidos, setPedidos] = useState([]);
+  const [form, setForm]       = useState(null);
+  const [periodo, setPeriodo] = useState('hoy');
+  const [cargando, setCarga]  = useState(true);
+
+  const col = db.collection(`reposteria/${uid}/caja`);
+
+  useEffect(() => {
+    const u = col.orderBy('fecha', 'desc').limit(300).onSnapshot(snap => {
+      setMovs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setCarga(false);
+    });
+    // Traer pedidos para poder vincular señas/saldos
+    db.collection(`reposteria/${uid}/pedidos`).get()
+      .then(s => setPedidos(s.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.clienteNombre)))
+      .catch(() => {});
+    return u;
+  }, [uid]);
+
+  const guardar = async (datos) => {
+    const { id, ...resto } = datos;
+    if (id) await col.doc(id).update({ ...resto, updatedAt: new Date() });
+    else    await col.add({ ...resto, createdAt: new Date() });
+    setForm(null);
+  };
+
+  const eliminar = async (id) => {
+    if (!confirm('¿Eliminar este movimiento de la caja?')) return;
+    await col.doc(id).delete();
+  };
+
+  // ── Filtrar por período ──
+  const hoyStr     = new Date().toISOString().slice(0, 10);
+  const semanaStr  = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const mesStr     = hoyStr.slice(0, 7);
+  const enPeriodo = (m) => {
+    if (periodo === 'hoy')    return m.fecha === hoyStr;
+    if (periodo === 'semana') return m.fecha >= semanaStr;
+    if (periodo === 'mes')    return (m.fecha || '').slice(0, 7) === mesStr;
+    return true;
+  };
+  const movsFiltrados = movs.filter(enPeriodo);
+
+  // ── Totales ──
+  const ingresos = movsFiltrados.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + (Number(m.monto) || 0), 0);
+  const egresos  = movsFiltrados.filter(m => m.tipo === 'egreso').reduce((s, m) => s + (Number(m.monto) || 0), 0);
+  const neto     = ingresos - egresos;
+
+  // ── Desglose por forma de pago (neto: ingresos - egresos) ──
+  const porPago = { efectivo: 0, transferencia: 0, debito: 0, credito: 0 };
+  movsFiltrados.forEach(m => {
+    const fp = m.formaPago || 'efectivo';
+    const signo = m.tipo === 'egreso' ? -1 : 1;
+    porPago[fp] = (porPago[fp] || 0) + signo * (Number(m.monto) || 0);
+  });
+
+  if (form !== null) {
+    return <FormularioMovimiento inicial={form} pedidos={pedidos} onGuardar={guardar} onCancelar={() => setForm(null)} />;
+  }
+
+  const PERIODOS = [['hoy', 'Hoy'], ['semana', '7 días'], ['mes', 'Mes'], ['todos', 'Todos']];
+
+  return (
+    <div style={{ paddingBottom: 80 }}>
+      <Header titulo="💰 Caja" onAdd={() => setForm({})} />
+
+      {/* Selector período */}
+      <div style={{ display: 'flex', background: 'var(--beige)', borderRadius: 12, margin: '10px 16px 0', padding: 4, gap: 4 }}>
+        {PERIODOS.map(([k, l]) => (
+          <button key={k} onClick={() => setPeriodo(k)} style={{
+            flex: 1, border: 'none', cursor: 'pointer', borderRadius: 9, padding: '8px 4px',
+            background: periodo === k ? 'var(--chocolate)' : 'transparent',
+            color: periodo === k ? 'var(--crema)' : 'var(--texto2)',
+            fontWeight: periodo === k ? 700 : 500, fontSize: 13, transition: 'all .15s',
+          }}>{l}</button>
+        ))}
+      </div>
+
+      {cargando && <p style={{ textAlign: 'center', padding: 40, color: 'var(--texto2)' }}>Cargando...</p>}
+
+      {!cargando && (
+        <div style={{ padding: '12px 16px' }}>
+
+          {/* ── Total de caja ── */}
+          <div style={{
+            background: neto >= 0 ? 'var(--chocolate)' : 'var(--rojo)',
+            borderRadius: 16, padding: '18px 20px', marginBottom: 14, color: 'var(--crema)',
+            boxShadow: 'var(--sombra2)',
+          }}>
+            <div style={{ fontSize: 12, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+              Total en caja {periodo !== 'todos' ? `(${PERIODOS.find(p => p[0] === periodo)[1].toLowerCase()})` : ''}
+            </div>
+            <div style={{ fontFamily: 'Playfair Display', fontSize: 34, fontWeight: 700 }}>{formatPeso(neto)}</div>
+            <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 13 }}>
+              <span>↗️ Ingresos: <b>{formatPeso(ingresos)}</b></span>
+              <span>↘️ Egresos: <b>{formatPeso(egresos)}</b></span>
+            </div>
+          </div>
+
+          {/* ── Desglose por forma de pago ── */}
+          <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--texto2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Desglose por forma de pago</p>
+          <div style={{ background: 'var(--superficie)', border: '1px solid var(--beige)', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+            {PAGOS_CAJA.map(([k, l], idx) => (
+              <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderBottom: idx < PAGOS_CAJA.length - 1 ? '1px solid var(--beige)' : 'none' }}>
+                <span style={{ fontSize: 13, color: 'var(--texto)' }}>{l}</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: porPago[k] < 0 ? 'var(--rojo)' : 'var(--chocolate)' }}>{formatPeso(porPago[k])}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Lista de movimientos ── */}
+          <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--texto2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+            Movimientos ({movsFiltrados.length})
+          </p>
+
+          {movsFiltrados.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--texto2)' }}>
+              <div style={{ fontSize: 40, marginBottom: 8 }}>🪙</div>
+              <p>Sin movimientos en este período</p>
+              <button onClick={() => setForm({})} style={{ ...S.btnPrimario, marginTop: 14 }}>+ Cargar movimiento</button>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {movsFiltrados.map(m => {
+              const cat = CAT_CAJA[m.categoria] || CAT_CAJA.ingreso;
+              const esEgreso = m.tipo === 'egreso';
+              const pagoLbl = (PAGOS_CAJA.find(p => p[0] === m.formaPago) || ['', m.formaPago])[1];
+              return (
+                <div key={m.id} style={{ background: 'var(--superficie)', border: '1px solid var(--beige)', borderRadius: 12, padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ fontSize: 22, flexShrink: 0 }}>{cat.icon}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--texto)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {m.concepto || cat.label}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--texto2)', marginTop: 2 }}>
+                      {cat.label} · {pagoLbl} · {formatFecha(m.fecha)}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: esEgreso ? 'var(--rojo)' : 'var(--verde)' }}>
+                      {esEgreso ? '−' : '+'}{formatPeso(m.monto)}
+                    </div>
+                    <button onClick={() => eliminar(m.id)} style={{ background: 'none', border: 'none', color: 'var(--texto2)', cursor: 'pointer', fontSize: 13, marginTop: 2 }}>🗑</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── FORMULARIO: NUEVO MOVIMIENTO DE CAJA ──
+function FormularioMovimiento({ inicial, pedidos, onGuardar, onCancelar }) {
+  const [m, setM] = useState({
+    categoria: 'sena', concepto: '', monto: '',
+    formaPago: 'efectivo', fecha: new Date().toISOString().slice(0, 10),
+    pedidoId: '', ...inicial,
+  });
+  const set = (k, v) => setM(prev => ({ ...prev, [k]: v }));
+  const cat = CAT_CAJA[m.categoria] || CAT_CAJA.ingreso;
+
+  // Al elegir un pedido, autocompletar concepto
+  const elegirPedido = (pedidoId) => {
+    set('pedidoId', pedidoId);
+    if (!pedidoId) return;
+    const p = pedidos.find(x => x.id === pedidoId);
+    if (p) {
+      const etiqueta = m.categoria === 'saldo' ? 'Saldo' : 'Seña';
+      set('concepto', `${etiqueta} — ${p.clienteNombre}${p.producto ? ' (' + p.producto + ')' : ''}`);
+      // Sugerir monto: seña pendiente o saldo restante
+      if (m.categoria === 'saldo') {
+        const saldo = (Number(p.precio) || 0) - (Number(p.sena) || 0);
+        if (saldo > 0 && !m.monto) set('monto', String(saldo));
+      } else if (m.categoria === 'sena' && p.sena && !m.monto) {
+        set('monto', String(p.sena));
+      }
+    }
+  };
+
+  const guardar = () => {
+    if (!(Number(m.monto) > 0)) return alert('Ingresá un monto mayor a 0');
+    const datos = {
+      ...m,
+      tipo: cat.tipo,
+      monto: Number(m.monto) || 0,
+      concepto: (m.concepto || '').trim() || cat.label,
+      hora: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
+    };
+    onGuardar(datos);
+  };
+
+  const vinculable = m.categoria === 'sena' || m.categoria === 'saldo';
+
+  return (
+    <div>
+      <Header titulo={m.id ? '✏️ Editar movimiento' : '+ Nuevo movimiento'} onBack={onCancelar} />
+      <div style={{ padding: '16px 16px 110px' }}>
+
+        {/* Categoría */}
+        <label style={S.label}>Tipo de movimiento</label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 12 }}>
+          {Object.entries(CAT_CAJA).map(([k, v]) => (
+            <button key={k} onClick={() => set('categoria', k)} style={{
+              padding: '10px 4px', borderRadius: 10, cursor: 'pointer',
+              border: m.categoria === k ? '2px solid var(--caramelo)' : '1px solid var(--beige)',
+              background: m.categoria === k ? 'var(--beige)' : 'transparent',
+              color: 'var(--texto)', fontSize: 12, fontWeight: m.categoria === k ? 700 : 500,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+            }}>
+              <span style={{ fontSize: 18 }}>{v.icon}</span>
+              <span>{v.label}</span>
+              <span style={{ fontSize: 9, color: v.tipo === 'egreso' ? 'var(--rojo)' : 'var(--verde)', fontWeight: 700 }}>
+                {v.tipo === 'egreso' ? 'SALE' : 'ENTRA'}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Vincular con encargo (solo seña/saldo) */}
+        {vinculable && pedidos.length > 0 && (
+          <>
+            <label style={S.label}>Vincular con un encargo (opcional)</label>
+            <select value={m.pedidoId} onChange={e => elegirPedido(e.target.value)} style={{ ...S.input, marginTop: 4 }}>
+              <option value="">— Sin vincular —</option>
+              {pedidos.map(p => (
+                <option key={p.id} value={p.id}>{p.clienteNombre}{p.producto ? ' · ' + p.producto : ''}</option>
+              ))}
+            </select>
+          </>
+        )}
+
+        <Campo label="Concepto" value={m.concepto} onChange={v => set('concepto', v)} placeholder={`Ej: ${cat.label} de Juana`} />
+        <Campo label="Monto ($)" value={m.monto} onChange={v => set('monto', v)} placeholder="0" tipo="number" />
+
+        {/* Forma de pago */}
+        <label style={S.label}>Forma de pago</label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 12 }}>
+          {PAGOS_CAJA.map(([k, l]) => (
+            <button key={k} onClick={() => set('formaPago', k)} style={{
+              padding: '9px 4px', borderRadius: 9, fontSize: 12,
+              fontWeight: m.formaPago === k ? 700 : 400,
+              border: m.formaPago === k ? '2px solid var(--caramelo)' : '1px solid var(--beige)',
+              background: m.formaPago === k ? 'var(--beige)' : 'none', color: 'var(--texto)', cursor: 'pointer',
+            }}>{l}</button>
+          ))}
+        </div>
+
+        <Campo label="Fecha" value={m.fecha} onChange={v => set('fecha', v)} tipo="date" />
+
+        {/* Vista previa */}
+        {Number(m.monto) > 0 && (
+          <div style={{
+            background: cat.tipo === 'egreso' ? 'rgba(192,57,43,0.07)' : 'rgba(39,174,96,0.08)',
+            border: `1px solid ${cat.tipo === 'egreso' ? 'rgba(192,57,43,0.3)' : 'rgba(39,174,96,0.3)'}`,
+            borderRadius: 10, padding: '10px 14px', marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <span style={{ fontSize: 13, color: 'var(--texto2)' }}>{cat.tipo === 'egreso' ? 'Sale de caja' : 'Entra a caja'}</span>
+            <b style={{ fontSize: 16, color: cat.tipo === 'egreso' ? 'var(--rojo)' : 'var(--verde)' }}>
+              {cat.tipo === 'egreso' ? '−' : '+'}{formatPeso(m.monto)}
+            </b>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <button onClick={guardar} style={{ ...S.btnPrimario, flex: 1, padding: 14, fontSize: 15 }}>
+            {m.id ? '✓ Guardar' : '+ Registrar movimiento'}
+          </button>
+          <button onClick={onCancelar} style={{ ...S.btnSecundario, padding: 14 }}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [fase, setFase] = useState(()=>{
     const lic = getLicenciaRepos();
@@ -3933,6 +4234,7 @@ function App() {
   const pantallas = {
     productos:     <PantallaProductos    uid={uid} ingBase={ingBase} recBase={recBase} />,
     pedidos:       <PantallaPedidos      uid={uid} />,
+    caja:          <PantallaCaja         uid={uid} />,
     recetas:       <PantallaRecetas      uid={uid} />,
     resumen:       <PantallaResumen      uid={uid} ingBase={ingBase} recBase={recBase} />,
     planificacion: <PantallaPlanificacion uid={uid} ingBase={ingBase} recBase={recBase} />,
