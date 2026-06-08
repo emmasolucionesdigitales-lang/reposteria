@@ -113,6 +113,7 @@ const firebaseConfig = {
 
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const db   = firebase.firestore();
+try{db.enablePersistence({synchronizeTabs:true}).catch(function(){});}catch(e){}
 const auth = firebase.auth();
 // Auth anónima para que las reglas de Firestore funcionen
 auth.signInAnonymously().catch(function(){});
@@ -144,10 +145,12 @@ const formatPeso = (n) =>
   '$' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 0 });
 
 const ESTADOS = {
-  pendiente: { label: 'Pendiente',  color: '#E67E22', bg: '#FEF3E2' },
-  listo:     { label: 'Listo ✓',   color: '#27AE60', bg: '#E9F7EF' },
-  entregado: { label: 'Entregado', color: '#7F8C8D', bg: '#F2F3F4' },
-  cancelado: { label: 'Cancelado', color: '#C0392B', bg: '#FDEDEC' },
+  pendiente:     { label: 'Pendiente',      color: '#E67E22', bg: '#FEF3E2' },
+  en_produccion: { label: 'En producción 🔧', color: '#8E44AD', bg: '#F4ECF7' },
+  listo:         { label: 'Listo ✓',        color: '#27AE60', bg: '#E9F7EF' },
+  a_entregar:    { label: 'A entregar 📦',   color: '#2980B9', bg: '#EBF5FB' },
+  entregado:     { label: 'Entregado',       color: '#7F8C8D', bg: '#F2F3F4' },
+  cancelado:     { label: 'Cancelado',       color: '#C0392B', bg: '#FDEDEC' },
 };
 
 // ══════════════════════════════════════════════════════
@@ -323,6 +326,61 @@ function Header({ titulo, onBack, onAdd, onLogout, subtitulo }) {
 // ══════════════════════════════════════════════════════
 // PANTALLA: AJUSTES
 // ══════════════════════════════════════════════════════
+function _uidRepos(){try{return (JSON.parse(localStorage.getItem('repos_licencia')||'null')||{}).deviceId||'default';}catch{return 'default';}}
+function _limpiarTSRepos(o){
+  if(o&&typeof o==='object'){
+    if(typeof o.toDate==='function'){try{return o.toDate().toISOString();}catch{return null;}}
+    if(Array.isArray(o))return o.map(_limpiarTSRepos);
+    const r={};for(const k in o)r[k]=_limpiarTSRepos(o[k]);return r;
+  }
+  return o;
+}
+async function exportarRespaldoRepos(){
+  try{
+    const uid=_uidRepos();
+    const cols=['productos','pedidos','stock','recetas','planificacion'];
+    const data={};
+    for(const c of cols){
+      const snap=await db.collection('reposteria/'+uid+'/'+c).get();
+      data[c]=snap.docs.map(d=>_limpiarTSRepos(Object.assign({_id:d.id},d.data())));
+    }
+    const local={};['dg_nombre','dg_tema','dg_dark','dg_escala','dg_rc_ing','dg_rc_rec'].forEach(k=>{const v=localStorage.getItem(k);if(v!=null)local[k]=v;});
+    const payload={app:'Dulce Gestion',fecha:new Date().toISOString(),uid,data,local};
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download='respaldo-dulcegestion-'+new Date().toISOString().slice(0,10)+'.json';
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(e){alert('No se pudo exportar: '+(e&&e.message||e));}
+}
+async function restaurarRespaldoRepos(file){
+  let obj;
+  try{obj=JSON.parse(await file.text());}catch(e){alert('El archivo no es un .json válido.');return;}
+  const data=(obj&&obj.data)?obj.data:null;
+  if(!data){alert('El archivo no es un respaldo de Dulce Gestion válido.');return;}
+  const cols=['productos','pedidos','stock','recetas','planificacion'];
+  const total=cols.reduce((a,c)=>a+((data[c]||[]).length),0);
+  if(!confirm('Esto va a SUBIR a la nube '+total+' registros del respaldo (reemplaza los que tengan el mismo código). ¿Continuar?'))return;
+  try{
+    const uid=_uidRepos();
+    for(const c of cols){
+      const arr=data[c]||[];
+      for(let i=0;i<arr.length;i+=400){
+        const batch=db.batch();
+        arr.slice(i,i+400).forEach(item=>{
+          const rest=Object.assign({},item);delete rest._id;
+          const ref=item._id?db.collection('reposteria/'+uid+'/'+c).doc(item._id):db.collection('reposteria/'+uid+'/'+c).doc();
+          batch.set(ref,rest);
+        });
+        await batch.commit();
+      }
+    }
+    if(obj.local){Object.keys(obj.local).forEach(k=>localStorage.setItem(k,obj.local[k]));}
+    alert('✅ Respaldo restaurado en la nube. La app se va a recargar.');
+    location.reload();
+  }catch(e){alert('Error al restaurar: '+(e&&e.message||e));}
+}
 function PantallaAjustes({ onLogout }) {
   const [nombre, setNombreState] = useState(getNombreNegocio());
   const [temaActual, setTemaActual] = useState(()=>localStorage.getItem('dg_tema')||'chocolate');
@@ -365,6 +423,22 @@ function PantallaAjustes({ onLogout }) {
           )}
         </div>
 
+        {/* Respaldo de datos */}
+        <div className="card-base" style={{ marginBottom: 16 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--texto2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>💾 Respaldo de datos</p>
+          <p style={{ fontSize: 12, color: 'var(--texto2)', lineHeight: 1.5, marginBottom: 12 }}>
+            Tus datos están en la nube, pero podés bajar una copia .json para guardarla aparte (mail, Drive). Si algún día pasa algo, la restaurás y volvés a subir todo.
+          </p>
+          <button onClick={exportarRespaldoRepos}
+            style={{ width: '100%', padding: '12px', borderRadius: 10, background: 'var(--caramelo)', color: 'white', border: 'none', fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}>
+            ⬇️ Descargar respaldo (.json)
+          </button>
+          <label style={{ width: '100%', display: 'block', textAlign: 'center', padding: '12px', borderRadius: 10, background: 'var(--beige)', color: 'var(--texto)', fontWeight: 600, cursor: 'pointer' }}>
+            ♻️ Restaurar desde un respaldo
+            <input type="file" accept=".json" style={{ display: 'none' }} onChange={e=>{ if(e.target.files[0]) restaurarRespaldoRepos(e.target.files[0]); }} />
+          </label>
+        </div>
+
         {/* Selector de temas */}
         <div className="card-base">
           <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--texto2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>Tema de colores</p>
@@ -398,10 +472,10 @@ function PantallaAjustes({ onLogout }) {
 const TABS = [
   { id: 'productos',     icon: '🧁', label: 'Productos'  },
   { id: 'pedidos',       icon: '📋', label: 'Pedidos'    },
-  { id: 'resumen',       icon: '📊', label: 'Resumen'    },
+  { id: 'planificacion', icon: '📐', label: 'Plan'       },
   { id: 'recetas',       icon: '🍰', label: 'Recetas'    },
-  { id: 'planificacion', icon: '📐', label: 'Planif.'   },
-  { id: 'ajustes',       icon: '⚙️', label: 'Ajustes'   },
+  { id: 'resumen',       icon: '📊', label: 'Resumen'    },
+  { id: 'ajustes',       icon: '⚙️', label: 'Config.'   },
 ];
 
 function NavBar({ activo, onChange }) {
@@ -816,7 +890,27 @@ function TarjetaPedido({ pedido, onEditar, onEstado, onEliminar }) {
             </p>
           )}
 
-          <div style={{ display: 'flex', gap: 20, marginTop: 10 }}>
+          {/* Desglose de extras */}
+          {(pedido.extras||[]).length > 0 && (
+            <div style={{ background:'var(--crema)', borderRadius:10, padding:'8px 12px', margin:'8px 0' }}>
+              <p style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:6 }}>Desglose</p>
+              {pedido.precioBase > 0 && (
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'var(--texto2)', marginBottom:3 }}>
+                  <span>Precio base</span><span>{formatPeso(pedido.precioBase)}</span>
+                </div>
+              )}
+              {(pedido.extras||[]).map(e=>(
+                <div key={e.id} style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'var(--texto2)', marginBottom:2 }}>
+                  <span>{e.nombre}</span><span>{formatPeso(e.precio)}</span>
+                </div>
+              ))}
+              <div style={{ display:'flex', justifyContent:'space-between', borderTop:'1px solid var(--beige)', paddingTop:5, marginTop:4, fontWeight:700, fontSize:13, color:'var(--chocolate)' }}>
+                <span>Total</span><span>{formatPeso(pedido.precio)}</span>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 20, marginTop: 8 }}>
             <div style={{ fontSize: 13 }}>
               <span style={{ color: 'var(--texto2)' }}>Seña: </span>
               <b>{formatPeso(pedido.sena)}</b>
@@ -835,28 +929,44 @@ function TarjetaPedido({ pedido, onEditar, onEstado, onEliminar }) {
             </div>
           )}
 
-          {/* Botones de acción */}
+          {/* Botones de acción — flujo de estados */}
           <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
             <button onClick={onEditar}
               style={{ ...S.btnSecundario, fontSize: 13, padding: '7px 12px' }}>
               ✏️ Editar
             </button>
+            {/* Avanzar estado */}
             {pedido.estado === 'pendiente' && (
+              <button onClick={() => onEstado(pedido.id, 'en_produccion')}
+                style={{ ...S.btnPrimario, fontSize: 13, padding: '7px 12px', background: '#8E44AD' }}>
+                🔧 En producción
+              </button>
+            )}
+            {pedido.estado === 'en_produccion' && (
               <button onClick={() => onEstado(pedido.id, 'listo')}
                 style={{ ...S.btnPrimario, fontSize: 13, padding: '7px 12px', background: 'var(--verde)' }}>
                 ✓ Listo
               </button>
             )}
             {pedido.estado === 'listo' && (
-              <button onClick={() => onEstado(pedido.id, 'entregado')}
-                style={{ ...S.btnPrimario, fontSize: 13, padding: '7px 12px', background: 'var(--gris)' }}>
-                📦 Entregado
+              <button onClick={() => onEstado(pedido.id, 'a_entregar')}
+                style={{ ...S.btnPrimario, fontSize: 13, padding: '7px 12px', background: '#2980B9' }}>
+                📦 A entregar
               </button>
             )}
-            {pedido.estado === 'listo' && (
-              <button onClick={() => onEstado(pedido.id, 'pendiente')}
-                style={{ ...S.btnSecundario, fontSize: 13, padding: '7px 12px' }}>
-                ↩ Pendiente
+            {pedido.estado === 'a_entregar' && (
+              <button onClick={() => onEstado(pedido.id, 'entregado')}
+                style={{ ...S.btnPrimario, fontSize: 13, padding: '7px 12px', background: 'var(--gris)' }}>
+                ✅ Entregado
+              </button>
+            )}
+            {/* Volver atrás */}
+            {(pedido.estado === 'en_produccion' || pedido.estado === 'listo' || pedido.estado === 'a_entregar') && (
+              <button onClick={() => {
+                const prev = { en_produccion:'pendiente', listo:'en_produccion', a_entregar:'listo' }[pedido.estado];
+                onEstado(pedido.id, prev);
+              }} style={{ ...S.btnSecundario, fontSize: 12, padding: '7px 10px' }}>
+                ↩
               </button>
             )}
             {pedido.estado !== 'cancelado' && pedido.estado !== 'entregado' && (
@@ -883,52 +993,150 @@ function FormularioPedido({ inicial, onGuardar, onCancelar }) {
   const [d, setD] = useState({
     clienteNombre: '', telefono: '', producto: '',
     descripcion: '', fechaEntrega: '', precio: '',
-    sena: '', estado: 'pendiente',
+    sena: '', estado: 'pendiente', extras: [],
     ...inicial,
   });
   const set = (k, v) => setD(prev => ({ ...prev, [k]: v }));
 
+  // ── Extras (decoración, impresión, caja, etc.) ──
+  const EXTRAS_SUGERIDOS = ['🖨️ Impresión comestible','🎁 Caja/packaging','🎂 Piso extra','✨ Fondant','🎨 Decoración personalizada','🚚 Envío a domicilio'];
+  const [nuevoExtra, setNuevoExtra] = useState('');
+  const [nuevoPrecioExtra, setNuevoPrecioExtra] = useState('');
+
+  const agregarExtra = () => {
+    if (!nuevoExtra.trim()) return;
+    const extra = { id: 'e'+Date.now(), nombre: nuevoExtra.trim(), precio: Number(nuevoPrecioExtra)||0 };
+    set('extras', [...(d.extras||[]), extra]);
+    setNuevoExtra(''); setNuevoPrecioExtra('');
+  };
+
+  const quitarExtra = (id) => set('extras', (d.extras||[]).filter(e=>e.id!==id));
+  const editarExtraPrecio = (id, precio) => set('extras', (d.extras||[]).map(e=>e.id===id?{...e,precio:Number(precio)||0}:e));
+
+  // Precio total = precio base + suma de extras
+  const totalExtras = (d.extras||[]).reduce((s,e)=>s+(Number(e.precio)||0),0);
+  const precioBase  = Number(d.precio)||0;
+  const totalFinal  = precioBase + totalExtras;
+
   const guardar = () => {
     if (!d.clienteNombre.trim()) return alert('El nombre del cliente es obligatorio');
     if (!d.producto.trim())      return alert('El producto es obligatorio');
-    onGuardar({ ...d, precio: Number(d.precio) || 0, sena: Number(d.sena) || 0 });
+    onGuardar({
+      ...d,
+      precio: totalFinal,
+      precioBase: precioBase,
+      extras: d.extras||[],
+      sena: Number(d.sena) || 0,
+    });
   };
 
   return (
     <div>
-      <Header titulo={d.id ? '✏️ Editar Pedido' : '+ Nuevo Pedido'} onBack={onCancelar} />
+      <Header titulo={d.id ? '✏️ Editar Pedido' : '+ Nuevo Encargo'} onBack={onCancelar} />
       <div style={{ padding: '16px 16px 110px' }}>
 
-        <Campo label="Cliente *" value={d.clienteNombre} onChange={v => set('clienteNombre', v)} placeholder="Nombre completo" />
-        <Campo label="Teléfono" value={d.telefono} onChange={v => set('telefono', v)} placeholder="Ej: 381 123 4567" tipo="tel" />
-        <Campo label="Producto *" value={d.producto} onChange={v => set('producto', v)} placeholder="Ej: Torta de cumpleaños 3 pisos" />
-        <Campo label="Descripción / Detalles" value={d.descripcion} onChange={v => set('descripcion', v)}
-          placeholder="Sabor, relleno, decoración, observaciones..." rows={3} />
-        <Campo label="Fecha de entrega" value={d.fechaEntrega} onChange={v => set('fechaEntrega', v)} tipo="date" />
-        <Campo label="Precio total ($)" value={d.precio} onChange={v => set('precio', v)} placeholder="0" tipo="number" />
-        <Campo label="Seña / Adelanto ($)" value={d.sena} onChange={v => set('sena', v)} placeholder="0" tipo="number" />
+        {/* Datos del cliente */}
+        <div style={{ background:'var(--beige)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
+          <p style={{ fontSize:12, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:8 }}>👤 Cliente</p>
+          <Campo label="Nombre *" value={d.clienteNombre} onChange={v => set('clienteNombre', v)} placeholder="Nombre completo" />
+          <Campo label="Teléfono" value={d.telefono} onChange={v => set('telefono', v)} placeholder="Ej: 381 123 4567" tipo="tel" />
+        </div>
 
-        {/* Saldo calculado */}
-        {(Number(d.precio) > 0) && (
-          <div style={{ background: 'var(--beige)', borderRadius: 10, padding: '10px 14px', marginTop: 4, fontSize: 13 }}>
-            <span style={{ color: 'var(--texto2)' }}>Saldo restante: </span>
-            <b style={{ color: 'var(--caramelo)' }}>
-              {formatPeso(Number(d.precio) - Number(d.sena))}
-            </b>
+        {/* Producto */}
+        <div style={{ background:'var(--beige)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
+          <p style={{ fontSize:12, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:8 }}>🍰 Pedido</p>
+          <Campo label="Producto *" value={d.producto} onChange={v => set('producto', v)} placeholder="Ej: Torta de cumpleaños 3 pisos" />
+          <Campo label="Descripción / Detalles" value={d.descripcion} onChange={v => set('descripcion', v)}
+            placeholder="Sabor, relleno, decoración, observaciones..." rows={3} />
+          <Campo label="Fecha de entrega" value={d.fechaEntrega} onChange={v => set('fechaEntrega', v)} tipo="date" />
+        </div>
+
+        {/* Precio base + extras */}
+        <div style={{ background:'var(--beige)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
+          <p style={{ fontSize:12, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:8 }}>💰 Precios</p>
+          <Campo label="Precio base del producto ($)" value={d.precio} onChange={v => set('precio', v)} placeholder="0" tipo="number" />
+
+          {/* Lista de extras */}
+          <label style={{...S.label, marginTop:12}}>🎁 Extras / adicionales</label>
+          {(d.extras||[]).length > 0 && (
+            <div style={{ marginBottom:8 }}>
+              {(d.extras||[]).map(e => (
+                <div key={e.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 0', borderBottom:'1px solid var(--beige2)' }}>
+                  <span style={{ flex:1, fontSize:13, color:'var(--texto)' }}>{e.nombre}</span>
+                  <input type="number" value={e.precio||''} onChange={ev=>editarExtraPrecio(e.id,ev.target.value)}
+                    placeholder="$0" style={{ width:80, padding:'5px 8px', borderRadius:8, border:'1.5px solid var(--beige2)', fontSize:13, textAlign:'right', background:'var(--superficie)' }}/>
+                  <button onClick={()=>quitarExtra(e.id)}
+                    style={{ background:'none', border:'none', color:'var(--rojo)', cursor:'pointer', fontSize:16 }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Sugerencias rápidas */}
+          <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:8 }}>
+            {EXTRAS_SUGERIDOS.filter(s=>!(d.extras||[]).some(e=>e.nombre===s)).map(s => (
+              <button key={s} onClick={()=>{ set('extras',[...(d.extras||[]),{id:'e'+Date.now(),nombre:s,precio:0}]); }}
+                style={{ padding:'4px 9px', borderRadius:20, border:'1px dashed var(--caramelo)', background:'transparent', color:'var(--caramelo)', fontSize:11, cursor:'pointer' }}>
+                + {s}
+              </button>
+            ))}
           </div>
-        )}
+
+          {/* Agregar extra personalizado */}
+          <div style={{ display:'flex', gap:6, marginBottom:6 }}>
+            <input value={nuevoExtra} onChange={e=>setNuevoExtra(e.target.value)}
+              placeholder="Nombre del extra..." onKeyDown={e=>e.key==='Enter'&&agregarExtra()}
+              style={{ flex:1, padding:'8px 10px', borderRadius:9, border:'1.5px solid var(--beige2)', background:'var(--superficie)', fontSize:13 }}/>
+            <input type="number" value={nuevoPrecioExtra} onChange={e=>setNuevoPrecioExtra(e.target.value)}
+              placeholder="$" onKeyDown={e=>e.key==='Enter'&&agregarExtra()}
+              style={{ width:70, padding:'8px', borderRadius:9, border:'1.5px solid var(--beige2)', background:'var(--superficie)', fontSize:13 }}/>
+            <button onClick={agregarExtra}
+              style={{ padding:'8px 12px', borderRadius:9, border:'none', background:'var(--caramelo)', color:'white', fontWeight:700, cursor:'pointer' }}>+</button>
+          </div>
+
+          {/* Desglose total */}
+          {(d.extras||[]).length > 0 && (
+            <div style={{ background:'var(--superficie)', borderRadius:10, padding:'10px 12px', marginTop:8 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'var(--texto2)', marginBottom:4 }}>
+                <span>Precio base</span><span>{formatPeso(precioBase)}</span>
+              </div>
+              {(d.extras||[]).map(e=>(
+                <div key={e.id} style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'var(--texto2)', marginBottom:2 }}>
+                  <span>{e.nombre}</span><span>{formatPeso(e.precio)}</span>
+                </div>
+              ))}
+              <div style={{ display:'flex', justifyContent:'space-between', borderTop:'1px solid var(--beige)', paddingTop:6, marginTop:4, fontWeight:700, fontSize:15, color:'var(--chocolate)' }}>
+                <span>Total</span><span>{formatPeso(totalFinal)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Seña */}
+        <div style={{ background:'var(--beige)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
+          <p style={{ fontSize:12, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:8 }}>💵 Pago</p>
+          <Campo label="Seña / Adelanto ($)" value={d.sena} onChange={v => set('sena', v)} placeholder="0" tipo="number" />
+          {totalFinal > 0 && (
+            <div style={{ display:'flex', justifyContent:'space-between', background:'var(--superficie)', borderRadius:10, padding:'10px 12px', marginTop:6, fontSize:13 }}>
+              <span style={{ color:'var(--texto2)' }}>Saldo restante</span>
+              <b style={{ color: (totalFinal - Number(d.sena)) > 0 ? 'var(--caramelo)' : 'var(--verde)' }}>
+                {formatPeso(Math.max(0, totalFinal - Number(d.sena)))}
+              </b>
+            </div>
+          )}
+        </div>
 
         {/* Estado */}
-        <label style={S.label}>Estado</label>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+        <label style={S.label}>Estado del pedido</label>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
           {Object.entries(ESTADOS).map(([k, v]) => (
             <button key={k} onClick={() => set('estado', k)}
               style={{
-                padding: '8px 14px', borderRadius: 20, cursor: 'pointer',
+                padding: '7px 12px', borderRadius: 20, cursor: 'pointer',
                 border: `2px solid ${d.estado === k ? v.color : 'var(--beige)'}`,
                 background: d.estado === k ? v.bg : 'transparent',
                 color: d.estado === k ? v.color : 'var(--texto2)',
-                fontWeight: 600, fontSize: 13,
+                fontWeight: 600, fontSize: 12,
               }}>
               {v.label}
             </button>
@@ -937,7 +1145,7 @@ function FormularioPedido({ inicial, onGuardar, onCancelar }) {
 
         <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
           <button onClick={guardar} style={{ ...S.btnPrimario, flex: 1, padding: 14, fontSize: 15 }}>
-            {d.id ? '✓ Guardar cambios' : '+ Crear pedido'}
+            {d.id ? '✓ Guardar cambios' : '+ Crear encargo'}
           </button>
           <button onClick={onCancelar} style={{ ...S.btnSecundario, padding: 14 }}>Cancelar</button>
         </div>
@@ -1867,6 +2075,67 @@ const RC_UNIT_HINT = { kg:'g', litro:'ml', docena:'un', unidad:'un' };
 // ══════════════════════════════════════════════════════
 // PANTALLA: RECETAS & COSTOS
 // ══════════════════════════════════════════════════════
+// ── COMPONENTE: AGREGAR INGREDIENTE RÁPIDO (desde modal de receta) ──
+function AgregarIngredienteRapido({ ing, saveIng, uid2, onAgregado }) {
+  const [abierto, setAbierto] = React.useState(false);
+  const [nombre, setNombre]   = React.useState('');
+  const [unidad, setUnidad]   = React.useState('kg');
+  const [precio, setPrecio]   = React.useState('');
+
+  const UNIDADES = ['kg','litro','docena','unidad'];
+
+  const guardar = () => {
+    if (!nombre.trim()) return alert('Escribí el nombre del ingrediente');
+    const nuevoIng = {
+      id: '_' + Math.random().toString(36).slice(2,9),
+      nombre: nombre.trim(),
+      unidad,
+      precio: Number(precio)||0,
+      margen: 50,
+    };
+    saveIng([...ing, nuevoIng]);
+    onAgregado(nuevoIng);
+    setNombre(''); setUnidad('kg'); setPrecio('');
+    setAbierto(false);
+  };
+
+  if (!abierto) return (
+    <button onClick={() => setAbierto(true)}
+      style={{ width:'100%', padding:'8px', borderRadius:10, border:'1.5px dashed var(--caramelo)',
+        background:'transparent', color:'var(--caramelo)', fontSize:13, cursor:'pointer', marginBottom:8, fontWeight:600 }}>
+      + Agregar ingrediente nuevo
+    </button>
+  );
+
+  return (
+    <div style={{ background:'var(--beige)', borderRadius:12, padding:'12px 14px', marginBottom:8, border:'1px solid var(--dorado)' }}>
+      <p style={{ fontSize:12, fontWeight:700, color:'var(--chocolate)', marginBottom:8 }}>🧂 Nuevo ingrediente</p>
+      <input value={nombre} onChange={e=>setNombre(e.target.value)}
+        placeholder="Nombre (ej: Harina 000)" style={{ display:'block', width:'100%', padding:'9px 12px', borderRadius:9, border:'1.5px solid var(--beige2)', background:'var(--superficie)', fontSize:13, marginBottom:8 }}/>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
+        <div>
+          <p style={{ fontSize:11, color:'var(--texto2)', marginBottom:3 }}>Unidad</p>
+          <select value={unidad} onChange={e=>setUnidad(e.target.value)}
+            style={{ width:'100%', padding:'8px', borderRadius:8, border:'1.5px solid var(--beige2)', background:'var(--superficie)', fontSize:13 }}>
+            {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </div>
+        <div>
+          <p style={{ fontSize:11, color:'var(--texto2)', marginBottom:3 }}>Precio costo ($)</p>
+          <input type="number" value={precio} onChange={e=>setPrecio(e.target.value)}
+            placeholder="0" style={{ width:'100%', padding:'8px', borderRadius:8, border:'1.5px solid var(--beige2)', background:'var(--superficie)', fontSize:13 }}/>
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:8 }}>
+        <button onClick={() => setAbierto(false)}
+          style={{ flex:1, padding:'8px', borderRadius:9, border:'1px solid var(--beige2)', background:'none', color:'var(--texto2)', cursor:'pointer', fontSize:13 }}>Cancelar</button>
+        <button onClick={guardar}
+          style={{ flex:2, padding:'8px', borderRadius:9, border:'none', background:'var(--caramelo)', color:'white', cursor:'pointer', fontSize:13, fontWeight:700 }}>✓ Agregar</button>
+      </div>
+    </div>
+  );
+}
+
 function PantallaRecetas({ uid }) {
   const loadIng = () => { try { return JSON.parse(localStorage.getItem('dg_rc_ing')) || ING_DEFAULT_RC; } catch { return ING_DEFAULT_RC; } };
   const loadRec = () => { try { return JSON.parse(localStorage.getItem('dg_rc_rec')) || REC_DEFAULT_RC; } catch { return REC_DEFAULT_RC; } };
@@ -2080,6 +2349,20 @@ function PantallaRecetas({ uid }) {
       })}
       <button onClick={() => setModRec({})}
         style={{ ...S.btnPrimario, width:'100%', padding:13, marginTop:6 }}>+ Nueva receta</button>
+
+      {/* Importar recetas */}
+      <div style={{ marginTop:10, display:'flex', gap:8 }}>
+        <button onClick={() => setSubTab('importar_excel')}
+          style={{ flex:1, padding:'10px 8px', borderRadius:10, border:'1.5px dashed var(--caramelo)',
+            background:'transparent', color:'var(--caramelo)', fontSize:12, cursor:'pointer', fontWeight:600 }}>
+          📊 Importar Excel
+        </button>
+        <button onClick={() => setSubTab('importar_ia')}
+          style={{ flex:1, padding:'10px 8px', borderRadius:10, border:'1.5px dashed var(--caramelo)',
+            background:'transparent', color:'var(--caramelo)', fontSize:12, cursor:'pointer', fontWeight:600 }}>
+          🤖 Importar con IA
+        </button>
+      </div>
     </div>
   );
 
@@ -2340,6 +2623,11 @@ function PantallaRecetas({ uid }) {
               );
             })}
           </div>
+          {/* Botón para agregar ingrediente nuevo desde el formulario */}
+          <AgregarIngredienteRapido
+            ing={ing} saveIng={saveIng} uid2={uid2}
+            onAgregado={(nuevoIng) => setChecks(prev => ({...prev, [nuevoIng.id]: ''}))}
+          />
           <div style={{ display:'flex', gap:10, marginTop:14 }}>
             <button onClick={() => setModRec(null)} style={{ ...S.btnSecundario, flex:1, padding:13 }}>Cancelar</button>
             <button onClick={guardar} style={{ ...S.btnPrimario, flex:2, padding:13 }}>💾 Guardar receta</button>
@@ -2349,12 +2637,187 @@ function PantallaRecetas({ uid }) {
     );
   };
 
+  // ── IMPORTAR EXCEL ───────────────────────────────
+  const TabImportarExcel = () => {
+    const [msg, setMsg] = React.useState('');
+    const PLANTILLA = [
+      ['nombre','emoji','descripcion','rinde','tipo','rinde_num'],
+      ['Torta de chocolate','🎂','Con ganache','8 porciones','torta','8'],
+      ['Alfajores','🍪','Maizena con dulce de leche','12 unidades','alfajor','12'],
+    ];
+
+    const descargarPlantilla = () => {
+      const csv = PLANTILLA.map(r => r.join(',')).join('\n');
+      const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download='plantilla-recetas.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+    };
+
+    const importar = (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const lines = ev.target.result.split('\n').filter(l=>l.trim());
+        if (lines.length < 2) { setMsg('El archivo está vacío o no tiene datos.'); return; }
+        const headers = lines[0].split(',').map(h=>h.trim().replace(/^\uFEFF/,''));
+        const nuevas = [];
+        for (let i=1; i<lines.length; i++) {
+          const vals = lines[i].split(',');
+          const row = {};
+          headers.forEach((h,j) => row[h] = (vals[j]||'').trim().replace(/^"|"$/g,''));
+          if (!row.nombre) continue;
+          nuevas.push({
+            id: '_'+Math.random().toString(36).slice(2,9),
+            nombre: row.nombre, emoji: row.emoji||'🍰',
+            descripcion: row.descripcion||''، rinde: row.rinde||'',
+            tipo: row.tipo||'delicia', rinde_num: Number(row.rinde_num)||8,
+            ingredientes: [],
+          });
+        }
+        if (!nuevas.length) { setMsg('No se encontraron recetas válidas.'); return; }
+        saveRec([...rec, ...nuevas]);
+        setMsg('✅ '+nuevas.length+' receta(s) importada(s). Ahora editá cada una para agregar ingredientes.');
+      };
+      reader.readAsText(file, 'UTF-8');
+    };
+
+    return (
+      <div style={{ padding:'16px 16px 100px' }}>
+        <button onClick={() => setSubTab('recetas')}
+          style={{ background:'none', border:'none', color:'var(--caramelo)', fontSize:14, cursor:'pointer', marginBottom:16, fontWeight:600 }}>← Volver</button>
+        <h2 style={{ fontFamily:'Playfair Display', fontSize:18, color:'var(--chocolate)', marginBottom:8 }}>📊 Importar desde Excel/CSV</h2>
+        <p style={{ fontSize:13, color:'var(--texto2)', marginBottom:16 }}>
+          Descargá la plantilla, completála en Excel o en Google Sheets, guardala como CSV y subila acá.
+          Los ingredientes los podés agregar después editando cada receta.
+        </p>
+        <button onClick={descargarPlantilla}
+          style={{ ...S.btnSecundario, width:'100%', padding:13, marginBottom:12 }}>
+          ⬇️ Descargar plantilla CSV
+        </button>
+        <div style={{ border:'2px dashed var(--caramelo)', borderRadius:14, padding:'20px', textAlign:'center', marginBottom:12 }}>
+          <div style={{ fontSize:36, marginBottom:8 }}>📂</div>
+          <p style={{ fontSize:13, color:'var(--texto2)', marginBottom:12 }}>Subí el archivo CSV completado</p>
+          <label style={{ ...S.btnPrimario, padding:'10px 20px', cursor:'pointer', display:'inline-block' }}>
+            📁 Elegir archivo
+            <input type="file" accept=".csv,.txt" onChange={importar} style={{ display:'none' }} />
+          </label>
+        </div>
+        {msg && <div style={{ background:msg.startsWith('✅')?'#E9F7EF':'#FDEDEC', color:msg.startsWith('✅')?'var(--verde)':'var(--rojo)', borderRadius:10, padding:'12px 14px', fontSize:13, fontWeight:600 }}>{msg}</div>}
+      </div>
+    );
+  };
+
+  // ── IMPORTAR CON IA ───────────────────────────────
+  const TabImportarIA = () => {
+    const [texto, setTexto]   = React.useState('');
+    const [cargando, setCarg] = React.useState(false);
+    const [resultado, setRes] = React.useState(null);
+    const [msg, setMsg]       = React.useState('');
+    const fileRef             = React.useRef();
+
+    const leerArchivo = (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => setTexto(ev.target.result);
+      reader.readAsText(file, 'UTF-8');
+    };
+
+    const extraerConIA = async () => {
+      if (!texto.trim()) return alert('Primero pegá o subí el texto de la receta.');
+      setCarg(true); setRes(null); setMsg('');
+      try {
+        const resp = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 1000,
+            messages: [{
+              role: 'user',
+              content: `Extraé la/s receta/s del siguiente texto y devolvé SOLO un JSON con este formato exacto (sin texto adicional, sin markdown):
+[{"nombre":"...","emoji":"🍰","descripcion":"...","rinde":"...","tipo":"torta","rinde_num":8,"ingredientes_texto":["250g harina","3 huevos","..."],"pasos":"..."}]
+
+Los tipos válidos son: torta, tarta, bizcochuelo, lemon_pie, cheesecake, factura, bola, alfajor, dona, muffin, cookie, rosca, pionono, pan, delicia.
+
+Texto de la receta:
+${texto}`
+            }]
+          })
+        });
+        const data = await resp.json();
+        const raw = data?.content?.[0]?.text || '';
+        const clean = raw.replace(/\`\`\`json|\`\`\`/g,'').trim();
+        const parsed = JSON.parse(clean);
+        setRes(Array.isArray(parsed) ? parsed : [parsed]);
+      } catch(e) {
+        setMsg('❌ No se pudo leer la receta. Revisá que el texto sea legible.');
+      }
+      setCarg(false);
+    };
+
+    const importarReceta = (r) => {
+      const nueva = {
+        id: '_'+Math.random().toString(36).slice(2,9),
+        nombre: r.nombre, emoji: r.emoji||'🍰',
+        descripcion: r.descripcion||r.ingredientes_texto?.join(', ')||''،
+        rinde: r.rinde||''، tipo: r.tipo||'delicia', rinde_num: Number(r.rinde_num)||8,
+        ingredientes: [],
+        pasos: r.pasos||''،
+      };
+      saveRec([...rec, nueva]);
+      setMsg('✅ "'+r.nombre+'" importada. Editala para vincular los ingredientes con tu stock.');
+    };
+
+    return (
+      <div style={{ padding:'16px 16px 100px' }}>
+        <button onClick={() => setSubTab('recetas')}
+          style={{ background:'none', border:'none', color:'var(--caramelo)', fontSize:14, cursor:'pointer', marginBottom:16, fontWeight:600 }}>← Volver</button>
+        <h2 style={{ fontFamily:'Playfair Display', fontSize:18, color:'var(--chocolate)', marginBottom:8 }}>🤖 Importar con IA</h2>
+        <p style={{ fontSize:13, color:'var(--texto2)', marginBottom:12 }}>
+          Pegá el texto de la receta (desde un PDF, Word, o cualquier fuente), o subí un archivo de texto, y la IA la interpreta automáticamente.
+        </p>
+        <textarea value={texto} onChange={e=>setTexto(e.target.value)}
+          placeholder="Pegá acá el texto de la receta... &#10;&#10;Ej: Torta de chocolate&#10;Ingredientes: 200g harina, 3 huevos, 150g azúcar..."
+          rows={8} style={{ display:'block', width:'100%', padding:'12px', borderRadius:10, border:'1.5px solid var(--beige2)', background:'var(--superficie)', fontSize:13, resize:'vertical', marginBottom:10 }}/>
+        <div style={{ display:'flex', gap:8, marginBottom:14 }}>
+          <label style={{ flex:1, ...S.btnSecundario, padding:'10px', textAlign:'center', cursor:'pointer', display:'block' }}>
+            📂 Subir .txt
+            <input ref={fileRef} type="file" accept=".txt,.text" onChange={leerArchivo} style={{ display:'none' }}/>
+          </label>
+          <button onClick={extraerConIA} disabled={cargando||!texto.trim()}
+            style={{ flex:2, ...S.btnPrimario, padding:'10px', opacity:cargando||!texto.trim()?0.6:1 }}>
+            {cargando ? '⏳ Analizando...' : '✨ Extraer receta con IA'}
+          </button>
+        </div>
+        {msg && <div style={{ background:msg.startsWith('✅')?'#E9F7EF':'#FDEDEC', color:msg.startsWith('✅')?'var(--verde)':'var(--rojo)', borderRadius:10, padding:'12px 14px', fontSize:13, fontWeight:600, marginBottom:12 }}>{msg}</div>}
+        {resultado && resultado.map((r,i) => (
+          <div key={i} style={{ background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:14, padding:'14px', marginBottom:10 }}>
+            <div style={{ fontSize:28, marginBottom:4 }}>{r.emoji||'🍰'}</div>
+            <div style={{ fontWeight:700, fontSize:15, color:'var(--chocolate)', marginBottom:4 }}>{r.nombre}</div>
+            {r.descripcion && <div style={{ fontSize:12, color:'var(--texto2)', marginBottom:4 }}>{r.descripcion}</div>}
+            {r.ingredientes_texto?.length > 0 && (
+              <div style={{ fontSize:12, color:'var(--texto2)', marginBottom:8 }}>
+                <b>Ingredientes detectados:</b> {r.ingredientes_texto.join(' · ')}
+              </div>
+            )}
+            <button onClick={() => importarReceta(r)}
+              style={{ ...S.btnPrimario, width:'100%', padding:10 }}>✓ Importar esta receta</button>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div>
-      <Header titulo="🍰 Recetas" onAdd={() => subTab==='stock' ? setModIngr({}) : setModRec({})} />
+      <Header titulo="🍰 Recetas" onAdd={() => subTab==='stock' ? setModIngr({}) : subTab==='recetas' ? setModRec({}) : null} />
       <SubTab />
-      {subTab === 'recetas' && <TabRecetas />}
-      {subTab === 'stock'   && <TabStock />}
+      {subTab === 'recetas'        && <TabRecetas />}
+      {subTab === 'stock'          && <TabStock />}
+      {subTab === 'importar_excel' && <TabImportarExcel />}
+      {subTab === 'importar_ia'    && <TabImportarIA />}
       {modIngr !== null && <ModalIngr />}
       {verRec   !== null && <ModalVerRec />}
       {modRec   !== null && <ModalEditRec />}
