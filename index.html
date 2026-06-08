@@ -2671,7 +2671,7 @@ function PantallaRecetas({ uid }) {
           nuevas.push({
             id: '_'+Math.random().toString(36).slice(2,9),
             nombre: row.nombre, emoji: row.emoji||'🍰',
-            descripcion: row.descripcion||''، rinde: row.rinde||'',
+            descripcion: row.descripcion||'', rinde: row.rinde||'',
             tipo: row.tipo||'delicia', rinde_num: Number(row.rinde_num)||8,
             ingredientes: [],
           });
@@ -2761,10 +2761,10 @@ ${texto}`
       const nueva = {
         id: '_'+Math.random().toString(36).slice(2,9),
         nombre: r.nombre, emoji: r.emoji||'🍰',
-        descripcion: r.descripcion||r.ingredientes_texto?.join(', ')||''،
-        rinde: r.rinde||''، tipo: r.tipo||'delicia', rinde_num: Number(r.rinde_num)||8,
+        descripcion: r.descripcion||r.ingredientes_texto?.join(', ')||'',
+        rinde: r.rinde||'', tipo: r.tipo||'delicia', rinde_num: Number(r.rinde_num)||8,
         ingredientes: [],
-        pasos: r.pasos||''،
+        pasos: r.pasos||'',
       };
       saveRec([...rec, nueva]);
       setMsg('✅ "'+r.nombre+'" importada. Editala para vincular los ingredientes con tu stock.');
