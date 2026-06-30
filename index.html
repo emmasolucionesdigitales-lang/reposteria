@@ -29,6 +29,7 @@
       --caramelo:   #A07B4F;
       --dorado:     #C7AE86;
       --crema:      #F5F3EF;
+      --barTxt:     #F5F3EF;
       --beige:      #E6E1D8;
       --beige2:     #E6E1D8;
       --superficie: #FFFFFF;
@@ -239,8 +240,10 @@ const TEMAS_DG = {
   salvia:  { nombre:'🌿 Salvia',  chocolate:'#2A302B', cacao:'#3F4A41', caramelo:'#6F9075', dorado:'#A1B6A5', crema:'#F4F6F2', beige:'#E2E7DF', superficie:'#FFFFFF', texto:'#1C211D', texto2:'#5B645C' },
 };
 
+const TEMA_CARBON = { chocolate:'#0F1115', cacao:'#1A1D23', caramelo:'#C9A06A', dorado:'#E0C089', crema:'#14161A', beige:'#2A2F38', superficie:'#20242B', texto:'#ECEEF2', texto2:'#99A1AD', barTxt:'#ECEEF2' };
+
 function aplicarTema(id) {
-  const t = TEMAS_DG[id] || TEMAS_DG.lino;
+  const t = (id === 'carbon') ? TEMA_CARBON : (TEMAS_DG[id] || TEMAS_DG.lino);
   const r = document.documentElement.style;
   r.setProperty('--chocolate',  t.chocolate);
   r.setProperty('--cacao',      t.cacao);
@@ -252,12 +255,13 @@ function aplicarTema(id) {
   r.setProperty('--superficie', t.superficie);
   r.setProperty('--texto',      t.texto);
   r.setProperty('--texto2',     t.texto2);
+  r.setProperty('--barTxt',     t.barTxt || t.crema);
   document.querySelector('meta[name=theme-color]')?.setAttribute('content', t.chocolate);
-  localStorage.setItem('dg_tema', id);
+  if (id !== 'carbon') localStorage.setItem('dg_tema', id);
 }
 
 // Aplicar tema guardado al cargar
-(()=>{ aplicarTema(localStorage.getItem('dg_tema')||'lino'); })();
+(()=>{ document.documentElement.style.filter=''; const d=localStorage.getItem('dg_dark')==='1'; aplicarTema(d?'carbon':(localStorage.getItem('dg_tema')||'lino')); })();
 
 // Nombre del negocio
 const getNombreNegocio = () => localStorage.getItem('dg_nombre') || 'Mi Repostería';
@@ -281,12 +285,12 @@ function Header({ titulo, onBack, onAdd, onLogout, subtitulo }) {
   if (onBack) {
     return (
       <header style={{
-        background: 'var(--chocolate)', color: 'var(--crema)',
+        background: 'var(--chocolate)', color: 'var(--barTxt)',
         padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10,
         position: 'relative', zIndex: 40, boxShadow: '0 2px 12px rgba(44,18,6,0.3)',
       }}>
         <button onClick={onBack}
-          style={{ background: 'none', border: 'none', color: 'var(--crema)', fontSize: 22, cursor: 'pointer', lineHeight: 1, flexShrink: 0 }}>←</button>
+          style={{ background: 'none', border: 'none', color: 'var(--barTxt)', fontSize: 22, cursor: 'pointer', lineHeight: 1, flexShrink: 0 }}>←</button>
         <span style={{ fontFamily: 'Playfair Display', fontSize: 16, fontWeight: 700 }}>{titulo}</span>
       </header>
     );
@@ -295,7 +299,7 @@ function Header({ titulo, onBack, onAdd, onLogout, subtitulo }) {
   // ── Portada de la app: marca + fecha (sin botones) ──
   return (
     <header style={{
-      background: 'var(--chocolate)', color: 'var(--crema)',
+      background: 'var(--chocolate)', color: 'var(--barTxt)',
       padding: '10px 16px',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       position: 'sticky', top: 0, zIndex: 50,
@@ -405,8 +409,10 @@ function PantallaAjustes({ onLogout }) {
   };
 
   const elegirTema = (id) => {
+    localStorage.setItem('dg_dark', '0');
     aplicarTema(id);
     setTemaActual(id);
+    window.dispatchEvent(new Event('dg-tema'));
   };
 
   return (
@@ -519,7 +525,7 @@ function NavBar({ activo, onChange }) {
         padding: '8px 14px', borderRadius: 12,
         border: on ? '2px solid var(--caramelo)' : '1px solid rgba(253,245,230,0.25)',
         background: on ? 'var(--caramelo)' : 'transparent',
-        color: 'var(--crema)', fontWeight: on ? 700 : 500, fontSize: 13,
+        color: 'var(--barTxt)', fontWeight: on ? 700 : 500, fontSize: 13,
         transition: 'all .15s', whiteSpace: 'nowrap',
       }}>
         <span style={{ fontSize: 16 }}>{t.icon}</span>
@@ -557,15 +563,23 @@ function BtnEscala(){
   const [esc,setEsc]=useState(()=>localStorage.getItem('dg_escala')||'M');
   useEffect(()=>{document.documentElement.style.fontSize=ESCALAS[esc]+'px';localStorage.setItem('dg_escala',esc);},[esc]);
   const sig=()=>{const i=orden.indexOf(esc);setEsc(orden[(i+1)%orden.length]);};
-  return <button onClick={sig} style={{borderRadius:18,background:'rgba(253,245,230,0.12)',color:'var(--crema)',fontSize:'0.72rem',fontWeight:700,display:'flex',alignItems:'center',gap:4,border:'1px solid rgba(253,245,230,0.25)',cursor:'pointer',padding:'7px 11px'}}>
+  return <button onClick={sig} style={{borderRadius:18,background:'rgba(253,245,230,0.12)',color:'var(--barTxt)',fontSize:'0.72rem',fontWeight:700,display:'flex',alignItems:'center',gap:4,border:'1px solid rgba(253,245,230,0.25)',cursor:'pointer',padding:'7px 11px'}}>
     {['S','M','L','XL'].map(s=><span key={s} style={{opacity:s===esc?1:0.4,fontWeight:s===esc?800:500}}>{s}</span>)}
   </button>;
 }
 
 function BtnDark(){
   const [dark,setDark]=useState(()=>localStorage.getItem('dg_dark')==='1');
-  useEffect(()=>{document.documentElement.style.filter=dark?'invert(1) hue-rotate(180deg)':'';document.querySelectorAll('img,video').forEach(el=>el.style.filter=dark?'invert(1) hue-rotate(180deg)':'');localStorage.setItem('dg_dark',dark?'1':'0');},[dark]);
-  return <button onClick={()=>setDark(d=>!d)} style={{borderRadius:18,background:'rgba(253,245,230,0.12)',color:'var(--crema)',fontSize:'0.95rem',fontWeight:700,border:'1px solid rgba(253,245,230,0.25)',cursor:'pointer',padding:'5px 10px'}}>
+  useEffect(()=>{
+    localStorage.setItem('dg_dark',dark?'1':'0');
+    aplicarTema(dark?'carbon':(localStorage.getItem('dg_tema')||'lino'));
+  },[dark]);
+  useEffect(()=>{
+    const h=()=>setDark(localStorage.getItem('dg_dark')==='1');
+    window.addEventListener('dg-tema',h);
+    return ()=>window.removeEventListener('dg-tema',h);
+  },[]);
+  return <button onClick={()=>setDark(d=>!d)} style={{borderRadius:18,background:'rgba(255,255,255,0.12)',color:'var(--barTxt)',fontSize:'0.95rem',fontWeight:700,border:'1px solid rgba(255,255,255,0.25)',cursor:'pointer',padding:'5px 10px'}}>
     {dark?'☀️':'🌙'}
   </button>;
 }
@@ -755,7 +769,7 @@ function PantallaActivacionRepos({onActivado}) {
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,background:"var(--crema)",gap:16}}>
       <div style={{fontSize:56}}>🍰</div>
-      <h1 style={{fontFamily:"Playfair Display",fontSize:28,color:"var(--chocolate)",margin:0}}>Dulce Gestión</h1>
+      <h1 style={{fontFamily:"Playfair Display",fontSize:28,color:"var(--texto)",margin:0}}>Dulce Gestión</h1>
       {paso===1&&<>
         <p style={{fontSize:14,color:"var(--texto2)",textAlign:"center",maxWidth:280}}>Ingresá el código de activación que recibiste.</p>
         <input style={{...S.input,textAlign:"center",fontSize:18,letterSpacing:3,textTransform:"uppercase",maxWidth:300,width:"100%"}} placeholder="RE-XXXXXX" value={codigo} onChange={e=>setCodigo(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&verificarCodigo()} />
@@ -772,7 +786,7 @@ function PantallaActivacionRepos({onActivado}) {
         </div>
         <label style={{display:"flex",alignItems:"flex-start",gap:10,maxWidth:300,cursor:"pointer"}}>
           <input type="checkbox" checked={terminos} onChange={e=>setTerminos(e.target.checked)} style={{marginTop:3,width:18,height:18,flexShrink:0}} />
-          <span style={{fontSize:12,color:"var(--texto2)",lineHeight:1.5}}>Acepto los <span style={{color:"var(--chocolate)",fontWeight:600}}>Términos y Condiciones</span> del servicio. La app se contrata mensualmente. El acceso se suspende si el pago no se realiza antes del día 11 de cada mes.</span>
+          <span style={{fontSize:12,color:"var(--texto2)",lineHeight:1.5}}>Acepto los <span style={{color:"var(--texto)",fontWeight:600}}>Términos y Condiciones</span> del servicio. La app se contrata mensualmente. El acceso se suspende si el pago no se realiza antes del día 11 de cada mes.</span>
         </label>
         {error&&<p style={{color:"var(--rojo)",fontSize:13}}>{error}</p>}
         <button style={{...S.btnPrimario,width:200,opacity:cargando?0.6:1}} disabled={cargando} onClick={completarActivacion}>{cargando?"Activando...":"Activar →"}</button>
@@ -798,10 +812,10 @@ function PantallaPinRepos({pin, onOk}) {
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,background:"var(--crema)"}}>
       <div style={{fontSize:48}}>🍰</div>
-      <h2 style={{color:"var(--chocolate)",margin:0}}>{lic?.negocio||"Dulce Gestión"}</h2>
+      <h2 style={{color:"var(--texto)",margin:0}}>{lic?.negocio||"Dulce Gestión"}</h2>
       {bioHabilitada && !bloqueado && (
         <button onClick={entrarBio}
-          style={{display:"flex",alignItems:"center",gap:8,padding:"13px 24px",borderRadius:14,border:"2px solid var(--chocolate)",background:"var(--superficie)",color:"var(--chocolate)",fontSize:15,fontWeight:700,cursor:"pointer"}}>
+          style={{display:"flex",alignItems:"center",gap:8,padding:"13px 24px",borderRadius:14,border:"2px solid var(--chocolate)",background:"var(--superficie)",color:"var(--texto)",fontSize:15,fontWeight:700,cursor:"pointer"}}>
           🔓 Entrar con huella
         </button>
       )}
@@ -812,7 +826,7 @@ function PantallaPinRepos({pin, onOk}) {
       </div>
       {error&&<p style={{color:"var(--rojo)",fontSize:13}}>{error}</p>}
       {!bloqueado&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,72px)",gap:10}}>
-        {teclas.map((t,i)=><button key={i} style={{height:60,fontSize:t==="⌫"?18:20,fontWeight:500,borderRadius:12,background:t===""?"transparent":"var(--superficie)",border:t===""?"none":"1px solid rgba(0,0,0,0.1)",color:"var(--chocolate)",cursor:t===""?"default":"pointer",opacity:t===""?0:1}} onClick={()=>{
+        {teclas.map((t,i)=><button key={i} style={{height:60,fontSize:t==="⌫"?18:20,fontWeight:500,borderRadius:12,background:t===""?"transparent":"var(--superficie)",border:t===""?"none":"1px solid rgba(0,0,0,0.1)",color:"var(--texto)",cursor:t===""?"default":"pointer",opacity:t===""?0:1}} onClick={()=>{
           if(t==="")return;
           if(t==="⌫"){setIntento(v=>v.slice(0,-1));return;}
           if(intento.length>=4)return;
@@ -982,7 +996,7 @@ function TarjetaPedido({ pedido, onEditar, onEstado, onEliminar }) {
       <div onClick={() => setAbierto(!abierto)} style={{ padding: '14px 16px', cursor: 'pointer' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div style={{ flex: 1, marginRight: 10 }}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--chocolate)' }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--texto)' }}>
               {pedido.clienteNombre || 'Sin nombre'}
             </div>
             <div style={{ fontSize: 13, color: 'var(--texto2)', marginTop: 2 }}>
@@ -1044,7 +1058,7 @@ function TarjetaPedido({ pedido, onEditar, onEstado, onEliminar }) {
                   <span>{e.nombre}</span><span>{formatPeso(e.precio)}</span>
                 </div>
               ))}
-              <div style={{ display:'flex', justifyContent:'space-between', borderTop:'1px solid var(--beige)', paddingTop:5, marginTop:4, fontWeight:700, fontSize:13, color:'var(--chocolate)' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', borderTop:'1px solid var(--beige)', paddingTop:5, marginTop:4, fontWeight:700, fontSize:13, color:'var(--texto)' }}>
                 <span>Total</span><span>{formatPeso(pedido.precio)}</span>
               </div>
             </div>
@@ -1192,7 +1206,7 @@ function FormularioPedido({ inicial, recetas = [], onGuardar, onCancelar }) {
         {/* Cargar rápido desde una receta */}
         {recetas.length > 0 && (
           <div style={{ background:'var(--dorado)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
-            <p style={{ fontSize:12, fontWeight:700, color:'var(--chocolate)', textTransform:'uppercase', marginBottom:8 }}>⚡ Cargar desde receta</p>
+            <p style={{ fontSize:12, fontWeight:700, color:'var(--texto)', textTransform:'uppercase', marginBottom:8 }}>⚡ Cargar desde receta</p>
             <select value="" onChange={e => cargarDesdeReceta(e.target.value)}
               style={{ width:'100%', padding:'11px 12px', borderRadius:10, border:'1.5px solid var(--caramelo)', background:'var(--superficie)', color:'var(--texto)', fontSize:14, cursor:'pointer' }}>
               <option value="">Elegí una receta…</option>
@@ -1283,7 +1297,7 @@ function FormularioPedido({ inicial, recetas = [], onGuardar, onCancelar }) {
                   <span>{e.nombre}</span><span>{formatPeso(e.precio)}</span>
                 </div>
               ))}
-              <div style={{ display:'flex', justifyContent:'space-between', borderTop:'1px solid var(--beige)', paddingTop:6, marginTop:4, fontWeight:700, fontSize:15, color:'var(--chocolate)' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', borderTop:'1px solid var(--beige)', paddingTop:6, marginTop:4, fontWeight:700, fontSize:15, color:'var(--texto)' }}>
                 <span>Total</span><span>{formatPeso(totalFinal)}</span>
               </div>
             </div>
@@ -1564,7 +1578,7 @@ function PantallaCalendario({ uid }) {
                 <div style={{
                   padding: '8px 14px', borderRadius: 10, marginBottom: 8,
                   background: esHoy ? 'var(--caramelo)' : esPasada ? 'var(--rojo)' : 'var(--chocolate)',
-                  color: 'var(--crema)', fontSize: 13, fontWeight: 700,
+                  color: 'var(--barTxt)', fontSize: 13, fontWeight: 700,
                   display: 'flex', justifyContent: 'space-between',
                 }}>
                   <span>
@@ -1644,7 +1658,7 @@ function PantallaHistorial({ uid }) {
 
         {/* Resumen del mes */}
         <div style={{
-          background: 'var(--chocolate)', color: 'var(--crema)',
+          background: 'var(--chocolate)', color: 'var(--barTxt)',
           borderRadius: 14, padding: 18, marginBottom: 16,
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
@@ -1821,7 +1835,7 @@ function PantallaPresupuestos({ uid }) {
             <div key={cat} style={{ marginBottom: 18 }}>
               {/* Cabecera categoría */}
               <div style={{
-                background: 'var(--chocolate)', color: 'var(--crema)',
+                background: 'var(--chocolate)', color: 'var(--barTxt)',
                 padding: '7px 14px', borderRadius: 10, marginBottom: 8,
                 fontWeight: 700, fontSize: 13, display: 'flex', justifyContent: 'space-between',
               }}>
@@ -1840,7 +1854,7 @@ function PantallaPresupuestos({ uid }) {
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--chocolate)' }}>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--texto)' }}>
                           {p.nombre}
                         </div>
                         {p.descripcion && (
@@ -1943,7 +1957,7 @@ function PantallaPresupuestos({ uid }) {
             </div>
           )}
 
-          <div style={{ background: 'var(--chocolate)', color: 'var(--crema)', borderRadius: 14, padding: 18, marginTop: 16 }}>
+          <div style={{ background: 'var(--chocolate)', color: 'var(--barTxt)', borderRadius: 14, padding: 18, marginTop: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
               <span style={{ fontSize: 13, opacity: 0.7 }}>Costo ingredientes</span>
               <span style={{ fontWeight: 700 }}>{formatPeso(costoTotal)}</span>
@@ -2302,7 +2316,7 @@ function AgregarIngredienteRapido({ ing, saveIng, uid2, onAgregado }) {
 
   return (
     <div style={{ background:'var(--beige)', borderRadius:12, padding:'12px 14px', marginBottom:8, border:'1px solid var(--dorado)' }}>
-      <p style={{ fontSize:12, fontWeight:700, color:'var(--chocolate)', marginBottom:8 }}>🧂 Nuevo ingrediente</p>
+      <p style={{ fontSize:12, fontWeight:700, color:'var(--texto)', marginBottom:8 }}>🧂 Nuevo ingrediente</p>
       <input value={nombre} onChange={e=>setNombre(e.target.value)}
         placeholder="Nombre (ej: Harina 000)" style={{ display:'block', width:'100%', padding:'9px 12px', borderRadius:9, border:'1.5px solid var(--beige2)', background:'var(--superficie)', fontSize:13, marginBottom:8 }}/>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
@@ -2379,7 +2393,7 @@ function PantallaRecetas({ uid }) {
             style={{
               flex:1, border:'none', cursor:'pointer', borderRadius:9, padding:'8px 4px',
               background: subTab===t.id ? 'var(--chocolate)' : 'transparent',
-              color: subTab===t.id ? 'var(--crema)' : 'var(--texto2)',
+              color: subTab===t.id ? 'var(--barTxt)' : 'var(--texto2)',
               fontWeight: subTab===t.id ? 700 : 500, fontSize:11,
               display:'flex', flexDirection:'column', alignItems:'center', gap:2,
               transition:'all .15s',
@@ -2518,7 +2532,7 @@ function PantallaRecetas({ uid }) {
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
               <div>
                 <div style={{ fontSize:32, marginBottom:4 }}>{r.emoji}</div>
-                <div style={{ fontWeight:700, fontSize:16, color:'var(--chocolate)', lineHeight:1.25 }}>{r.nombre}</div>
+                <div style={{ fontWeight:700, fontSize:16, color:'var(--texto)', lineHeight:1.25 }}>{r.nombre}</div>
                 <div style={{ fontSize:12, color:'var(--texto2)', marginTop:3 }}>{r.descripcion}</div>
                 <div style={{ fontSize:11, color:'var(--texto2)', marginTop:2 }}>📦 {r.rinde}</div>
               </div>
@@ -2574,6 +2588,7 @@ function PantallaRecetas({ uid }) {
 
     return (
       <div style={{ padding:'12px 16px 120px' }}>
+        <button onClick={() => setSubTab('recetas')} style={{ ...S.btnSecundario, marginBottom:12, padding:'8px 14px', fontSize:13 }}>← Volver a recetas</button>
         <div style={{ background:'var(--superficie)', borderRadius:14, padding:16, marginBottom:12, boxShadow:'var(--sombra)', border:'1px solid var(--beige)' }}>
           <Campo label="Receta" value={calcId||''} onChange={v => setCalcId(v||null)} tipo="select">
             <option value="">— Elegí una receta —</option>
@@ -2598,7 +2613,7 @@ function PantallaRecetas({ uid }) {
         {recSel && (
           <>
             <div style={{ background:'var(--superficie)', borderRadius:14, padding:16, marginBottom:12, border:'1px solid var(--beige)', boxShadow:'var(--sombra)' }}>
-              <div style={{ fontWeight:700, fontSize:15, color:'var(--chocolate)', marginBottom:12 }}>
+              <div style={{ fontWeight:700, fontSize:15, color:'var(--texto)', marginBottom:12 }}>
                 {recSel.emoji} {recSel.nombre} × {calcN}
               </div>
               {items.map((it, i) => (
@@ -2610,7 +2625,7 @@ function PantallaRecetas({ uid }) {
               ))}
             </div>
 
-            <div style={{ background:'var(--chocolate)', color:'var(--crema)', borderRadius:14, padding:18 }}>
+            <div style={{ background:'var(--chocolate)', color:'var(--barTxt)', borderRadius:14, padding:18 }}>
               {[
                 ['Costo materia prima (×'+calcN+')', rcPeso(costoProd), null],
                 ['Costo por unidad/porción', rcPeso(costoBase), null],
@@ -2669,7 +2684,7 @@ function PantallaRecetas({ uid }) {
       <div style={{ position:'fixed', inset:0, background:'rgba(44,18,6,0.52)', zIndex:200, display:'flex', alignItems:'flex-end' }}
         onClick={e => e.target === e.currentTarget && setModIngr(null)}>
         <div style={{ background:'var(--superficie)', borderRadius:'20px 20px 0 0', padding:'24px 20px 44px', width:'100%', maxHeight:'85vh', overflowY:'auto' }}>
-          <h2 style={{ fontFamily:'Playfair Display', fontSize:20, color:'var(--chocolate)', marginBottom:16 }}>
+          <h2 style={{ fontFamily:'Playfair Display', fontSize:20, color:'var(--texto)', marginBottom:16 }}>
             {isEdit ? '✏️ Editar' : '🧂 Nuevo'} Ingrediente
           </h2>
           <Campo label="Nombre del ingrediente" value={nombre} onChange={setNombre} placeholder="Ej: Harina 0000" />
@@ -2708,7 +2723,7 @@ function PantallaRecetas({ uid }) {
       <div style={{ position:'fixed', inset:0, background:'rgba(44,18,6,0.52)', zIndex:200, display:'flex', alignItems:'flex-end' }}
         onClick={e => e.target === e.currentTarget && setVerRec(null)}>
         <div style={{ background:'var(--superficie)', borderRadius:'20px 20px 0 0', padding:'24px 20px 44px', width:'100%', maxHeight:'90vh', overflowY:'auto' }}>
-          <h2 style={{ fontFamily:'Playfair Display', fontSize:20, color:'var(--chocolate)', marginBottom:4 }}>{r.emoji} {r.nombre}</h2>
+          <h2 style={{ fontFamily:'Playfair Display', fontSize:20, color:'var(--texto)', marginBottom:4 }}>{r.emoji} {r.nombre}</h2>
           <p style={{ fontSize:13, color:'var(--texto2)', marginBottom:4 }}>{r.descripcion}</p>
           <p style={{ fontSize:12, color:'var(--texto2)', marginBottom:14 }}>📦 {r.rinde}</p>
           {(r.ingredientes||[]).map((ir, i) => {
@@ -2722,7 +2737,7 @@ function PantallaRecetas({ uid }) {
               </div>
             );
           })}
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:16, padding:'14px 16px', background:'var(--chocolate)', borderRadius:12, color:'var(--crema)' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:16, padding:'14px 16px', background:'var(--chocolate)', borderRadius:12, color:'var(--barTxt)' }}>
             <span style={{ fontSize:14, opacity:.8 }}>Costo total materia prima</span>
             <span style={{ fontFamily:'Playfair Display', fontSize:22, color:'var(--dorado)', fontWeight:700 }}>{rcPeso(ct)}</span>
           </div>
@@ -2775,7 +2790,7 @@ function PantallaRecetas({ uid }) {
       <div style={{ position:'fixed', inset:0, background:'rgba(44,18,6,0.52)', zIndex:200, display:'flex', alignItems:'flex-end' }}
         onClick={e => e.target === e.currentTarget && setModRec(null)}>
         <div style={{ background:'var(--superficie)', borderRadius:'20px 20px 0 0', padding:'24px 20px 44px', width:'100%', maxHeight:'92vh', overflowY:'auto' }}>
-          <h2 style={{ fontFamily:'Playfair Display', fontSize:20, color:'var(--chocolate)', marginBottom:16 }}>
+          <h2 style={{ fontFamily:'Playfair Display', fontSize:20, color:'var(--texto)', marginBottom:16 }}>
             {isEdit ? '✏️ Editar' : '📖 Nueva'} Receta
           </h2>
           <div style={{ display:'grid', gridTemplateColumns:'64px 1fr', gap:10 }}>
@@ -2882,7 +2897,7 @@ function PantallaRecetas({ uid }) {
       <div style={{ padding:'16px 16px 100px' }}>
         <button onClick={() => setSubTab('recetas')}
           style={{ background:'none', border:'none', color:'var(--caramelo)', fontSize:14, cursor:'pointer', marginBottom:16, fontWeight:600 }}>← Volver</button>
-        <h2 style={{ fontFamily:'Playfair Display', fontSize:18, color:'var(--chocolate)', marginBottom:8 }}>📊 Importar desde Excel/CSV</h2>
+        <h2 style={{ fontFamily:'Playfair Display', fontSize:18, color:'var(--texto)', marginBottom:8 }}>📊 Importar desde Excel/CSV</h2>
         <p style={{ fontSize:13, color:'var(--texto2)', marginBottom:16 }}>
           Descargá la plantilla, completála en Excel o en Google Sheets, guardala como CSV y subila acá.
           Los ingredientes los podés agregar después editando cada receta.
@@ -2969,7 +2984,7 @@ ${texto}`
       <div style={{ padding:'16px 16px 100px' }}>
         <button onClick={() => setSubTab('recetas')}
           style={{ background:'none', border:'none', color:'var(--caramelo)', fontSize:14, cursor:'pointer', marginBottom:16, fontWeight:600 }}>← Volver</button>
-        <h2 style={{ fontFamily:'Playfair Display', fontSize:18, color:'var(--chocolate)', marginBottom:8 }}>🤖 Importar con IA</h2>
+        <h2 style={{ fontFamily:'Playfair Display', fontSize:18, color:'var(--texto)', marginBottom:8 }}>🤖 Importar con IA</h2>
         <p style={{ fontSize:13, color:'var(--texto2)', marginBottom:12 }}>
           Pegá el texto de la receta (desde un PDF, Word, o cualquier fuente), o subí un archivo de texto, y la IA la interpreta automáticamente.
         </p>
@@ -2990,7 +3005,7 @@ ${texto}`
         {resultado && resultado.map((r,i) => (
           <div key={i} style={{ background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:14, padding:'14px', marginBottom:10 }}>
             <div style={{ fontSize:28, marginBottom:4 }}>{r.emoji||'🍰'}</div>
-            <div style={{ fontWeight:700, fontSize:15, color:'var(--chocolate)', marginBottom:4 }}>{r.nombre}</div>
+            <div style={{ fontWeight:700, fontSize:15, color:'var(--texto)', marginBottom:4 }}>{r.nombre}</div>
             {r.descripcion && <div style={{ fontSize:12, color:'var(--texto2)', marginBottom:4 }}>{r.descripcion}</div>}
             {r.ingredientes_texto?.length > 0 && (
               <div style={{ fontSize:12, color:'var(--texto2)', marginBottom:8 }}>
@@ -3011,6 +3026,7 @@ ${texto}`
       <SubTab />
       {subTab === 'recetas'        && <TabRecetas />}
       {subTab === 'stock'          && <TabStock />}
+      {subTab === 'calcular'       && <TabCalcular />}
       {subTab === 'importar_excel' && <TabImportarExcel />}
       {subTab === 'importar_ia'    && <TabImportarIA />}
       {modIngr !== null && <ModalIngr />}
@@ -3399,13 +3415,13 @@ function ModalOpciones({ item, ingBase, recBase, onGuardar, onCancelar }) {
         <div style={{background:'var(--beige)',borderRadius:12,padding:'12px 14px',marginBottom:14}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
             <span style={{fontSize:13,color:'var(--texto)'}}>Costo materia prima (1 batch)</span>
-            <span style={{fontSize:16,fontWeight:700,color:'var(--chocolate)'}}>${costoReceta.toLocaleString('es-AR')}</span>
+            <span style={{fontSize:16,fontWeight:700,color:'var(--texto)'}}>${costoReceta.toLocaleString('es-AR')}</span>
           </div>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2}}>
             <span style={{fontSize:12,color:'var(--texto2)'}}>{tipo.label} · rinde {rindeNum} {tipo.modo==='porcionable'?'porciones':'unidades'}</span>
             <span style={{fontSize:11,color:'var(--verde)',fontWeight:600}}>Margen: {margenSug}%</span>
           </div>
-          <div style={{fontSize:11,color:'var(--chocolate)',fontWeight:600,marginTop:2}}>
+          <div style={{fontSize:11,color:'var(--texto)',fontWeight:600,marginTop:2}}>
             {tipo.modo==='porcionable'
               ? `Entera: $${calcPrecio(1,margenSug).toLocaleString('es-AR')} · Porción: $${calcPrecio(rindeNum,margenSug).toLocaleString('es-AR')}`
               : `Por lote: $${calcPrecio(1,margenSug).toLocaleString('es-AR')} · Por unidad: $${calcPrecio(rindeNum,margenSug).toLocaleString('es-AR')}`
@@ -3809,7 +3825,7 @@ function PantallaProductos({ uid, ingBase, recBase }) {
                       <button onClick={()=>cambiar(i.key,-1)} style={{width:22,height:22,borderRadius:'50%',border:'1px solid var(--beige2)',background:'none',cursor:'pointer',color:'var(--texto)',fontSize:14}}>-</button>
                       <span style={{fontSize:14,fontWeight:700,color:'var(--texto)',minWidth:20,textAlign:'center'}}>{i.cantidad}</span>
                       <button onClick={()=>cambiar(i.key,+1)} style={{width:22,height:22,borderRadius:'50%',border:'1px solid var(--beige2)',background:'none',cursor:'pointer',color:'var(--texto)',fontSize:14}}>+</button>
-                      <span style={{fontSize:13,fontWeight:600,color:'var(--chocolate)',minWidth:56,textAlign:'right'}}>${(i.precio*i.cantidad).toLocaleString('es-AR')}</span>
+                      <span style={{fontSize:13,fontWeight:600,color:'var(--texto)',minWidth:56,textAlign:'right'}}>${(i.precio*i.cantidad).toLocaleString('es-AR')}</span>
                     </div>
                   </div>
                 ))}
@@ -3865,7 +3881,7 @@ function PantallaProductos({ uid, ingBase, recBase }) {
           <div style={{borderTop:'1px solid var(--beige)',paddingTop:10}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
               <span style={{fontSize:15,fontWeight:700,color:'var(--texto)'}}>Total</span>
-              <span style={{fontSize:20,fontWeight:700,color:'var(--chocolate)'}}>${total.toLocaleString('es-AR')}</span>
+              <span style={{fontSize:20,fontWeight:700,color:'var(--texto)'}}>${total.toLocaleString('es-AR')}</span>
             </div>
             {confirmado && <div style={{background:'#d4edda',color:'#155724',borderRadius:8,padding:'8px',textAlign:'center',fontSize:13,marginBottom:8}}>✅ Venta confirmada</div>}
             <button onClick={confirmar} disabled={!carrito.length} style={{...S.btnPrimario,width:'100%',opacity:carrito.length?1:0.5}}>✓ Confirmar venta</button>
@@ -3986,7 +4002,7 @@ function PantallaResumen({ uid, ingBase, recBase }) {
       {/* Selector período */}
       <div style={{display:'flex',background:'var(--beige)',borderRadius:12,margin:'10px 16px 0',padding:4,gap:4}}>
         {PERIODOS.map(([k,l])=>(
-          <button key={k} onClick={()=>setPeriodo(k)} style={{flex:1,border:'none',cursor:'pointer',borderRadius:9,padding:'8px 4px',background:periodo===k?'var(--chocolate)':'transparent',color:periodo===k?'var(--crema)':'var(--texto2)',fontWeight:periodo===k?700:500,fontSize:13,transition:'all .15s'}}>
+          <button key={k} onClick={()=>setPeriodo(k)} style={{flex:1,border:'none',cursor:'pointer',borderRadius:9,padding:'8px 4px',background:periodo===k?'var(--chocolate)':'transparent',color:periodo===k?'var(--barTxt)':'var(--texto2)',fontWeight:periodo===k?700:500,fontSize:13,transition:'all .15s'}}>
             {l}
           </button>
         ))}
@@ -4010,7 +4026,7 @@ function PantallaResumen({ uid, ingBase, recBase }) {
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
               <div style={{background:'var(--superficie)',border:'1px solid var(--beige)',borderRadius:12,padding:'12px 14px'}}>
                 <div style={{fontSize:11,color:'var(--texto2)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:4}}>Ventas</div>
-                <div style={{fontSize:22,fontWeight:700,color:'var(--chocolate)'}}>{fmt(totalVentas)}</div>
+                <div style={{fontSize:22,fontWeight:700,color:'var(--texto)'}}>{fmt(totalVentas)}</div>
                 <div style={{fontSize:11,color:'var(--texto2)',marginTop:2}}>{pedidosFiltrados.length} pedido{pedidosFiltrados.length!==1?'s':''}</div>
               </div>
               {periodo==='hoy' && (
@@ -4029,7 +4045,7 @@ function PantallaResumen({ uid, ingBase, recBase }) {
               )}
               <div style={{background:'var(--superficie)',border:'1px solid var(--beige)',borderRadius:12,padding:'12px 14px'}}>
                 <div style={{fontSize:11,color:'var(--texto2)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:4}}>Ticket promedio</div>
-                <div style={{fontSize:22,fontWeight:700,color:'var(--chocolate)'}}>{fmt(pedidosVenta.length?totalVentas/pedidosVenta.length:0)}</div>
+                <div style={{fontSize:22,fontWeight:700,color:'var(--texto)'}}>{fmt(pedidosVenta.length?totalVentas/pedidosVenta.length:0)}</div>
                 <div style={{fontSize:11,color:'var(--texto2)',marginTop:2}}>por pedido</div>
               </div>
               {totalPerdidas > 0 && (
@@ -4047,7 +4063,7 @@ function PantallaResumen({ uid, ingBase, recBase }) {
               {Object.entries(pagoLabel).map(([k,l])=> porPago[k]>0 && (
                 <div key={k} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 14px',borderBottom:'1px solid var(--beige)'}}>
                   <span style={{fontSize:13,color:'var(--texto)'}}>{l}</span>
-                  <span style={{fontSize:14,fontWeight:700,color:'var(--chocolate)'}}>{fmt(porPago[k])}</span>
+                  <span style={{fontSize:14,fontWeight:700,color:'var(--texto)'}}>{fmt(porPago[k])}</span>
                 </div>
               ))}
               {(transferConfirmada>0||transferPendiente>0) && (
@@ -4066,7 +4082,7 @@ function PantallaResumen({ uid, ingBase, recBase }) {
               )}
               <div style={{display:'flex',justifyContent:'space-between',padding:'10px 14px',background:'var(--beige)'}}>
                 <span style={{fontSize:13,fontWeight:700,color:'var(--texto)'}}>Total cobrado</span>
-                <span style={{fontSize:14,fontWeight:700,color:'var(--chocolate)'}}>{fmt(totalVentas-transferPendiente)}</span>
+                <span style={{fontSize:14,fontWeight:700,color:'var(--texto)'}}>{fmt(totalVentas-transferPendiente)}</span>
               </div>
             </div>
 
@@ -4103,7 +4119,7 @@ function PantallaResumen({ uid, ingBase, recBase }) {
                         <div style={{fontSize:11,color:'var(--texto2)'}}>{p.cantidad} unidad{p.cantidad!==1?'es':''}</div>
                       </div>
                       <div style={{textAlign:'right'}}>
-                        <div style={{fontSize:13,fontWeight:700,color:'var(--chocolate)'}}>{fmt(p.total)}</div>
+                        <div style={{fontSize:13,fontWeight:700,color:'var(--texto)'}}>{fmt(p.total)}</div>
                         <div style={{fontSize:10,color:'var(--texto2)'}}>{totalVentas>0?Math.round(p.total/totalVentas*100):0}% del total</div>
                       </div>
                     </div>
@@ -4217,7 +4233,7 @@ function PantallaCaja({ uid }) {
           <button key={k} onClick={() => setPeriodo(k)} style={{
             flex: 1, border: 'none', cursor: 'pointer', borderRadius: 9, padding: '8px 4px',
             background: periodo === k ? 'var(--chocolate)' : 'transparent',
-            color: periodo === k ? 'var(--crema)' : 'var(--texto2)',
+            color: periodo === k ? 'var(--barTxt)' : 'var(--texto2)',
             fontWeight: periodo === k ? 700 : 500, fontSize: 13, transition: 'all .15s',
           }}>{l}</button>
         ))}
@@ -4231,7 +4247,7 @@ function PantallaCaja({ uid }) {
           {/* ── Total de caja ── */}
           <div style={{
             background: neto >= 0 ? 'var(--chocolate)' : 'var(--rojo)',
-            borderRadius: 16, padding: '18px 20px', marginBottom: 14, color: 'var(--crema)',
+            borderRadius: 16, padding: '18px 20px', marginBottom: 14, color: 'var(--barTxt)',
             boxShadow: 'var(--sombra2)',
           }}>
             <div style={{ fontSize: 12, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
