@@ -2365,6 +2365,7 @@ function PantallaRecetas({ uid }) {
   const [calcId, setCalcId]  = useState(null);
   const [calcN, setCalcN]    = useState(1);
   const [margen, setMargen]  = useState(150);
+  const [calcPorc, setCalcPorc] = useState(8);
 
   const saveIng = v => {
     setIngState(v);
@@ -2585,6 +2586,12 @@ function PantallaRecetas({ uid }) {
     const precioUnit= costoBase * (1 + margen / 100);
     const precioTot = precioUnit * calcN;
     const ganancia  = precioTot - costoProd;
+    const aplicarPrecio = () => {
+      if (!recSel) return;
+      const nuevo = Math.round(precioUnit);
+      saveRec(rec.map(r => r.id === recSel.id ? { ...r, precioVenta: nuevo } : r));
+      alert('✅ Precio aplicado a "' + recSel.nombre + '": ' + rcPeso(nuevo) + '\n\nYa lo podés ajustar a mano en ✏️ Editar receta, y se completa solo al cargar un encargo.');
+    };
 
     return (
       <div style={{ padding:'12px 16px 120px' }}>
@@ -2596,10 +2603,11 @@ function PantallaRecetas({ uid }) {
           </Campo>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <Campo label="Cantidad a producir" value={calcN} onChange={v => setCalcN(Math.max(1,Number(v)||1))} tipo="number" placeholder="1" />
-            <Campo label="Margen ganancia %" value={margen} onChange={v => setMargen(Math.max(0,Number(v)||0))} tipo="number" placeholder="150" />
+            <Campo label="Porciones por unidad" value={calcPorc} onChange={v => setCalcPorc(Math.max(1,Number(v)||1))} tipo="number" placeholder="8" />
           </div>
+          <Campo label="Margen ganancia %" value={margen} onChange={v => setMargen(Math.max(0,Number(v)||0))} tipo="number" placeholder="150" />
           <div style={{ fontSize:11, color:'var(--texto2)', textAlign:'center', marginTop:-4 }}>
-            Margen recomendado: 150% (vendés 2.5× el costo)
+            Tortas y tartas: mínimo 8 porciones · Margen recomendado: 150%
           </div>
         </div>
 
@@ -2638,10 +2646,14 @@ function PantallaRecetas({ uid }) {
               ))}
               <div style={{ marginTop:16, paddingTop:14, borderTop:'1px solid rgba(253,245,230,0.2)' }}>
                 <div style={{ fontSize:10, opacity:.6, textTransform:'uppercase', letterSpacing:'.7px', marginBottom:4 }}>
-                  Precio de venta sugerido por unidad
+                  Precio sugerido · unidad entera
                 </div>
                 <div style={{ fontFamily:'Playfair Display', fontSize:32, color:'var(--dorado)', fontWeight:700 }}>{rcPeso(precioUnit)}</div>
-                <div style={{ fontSize:11, opacity:.55, marginTop:4 }}>Rinde: {recSel.rinde}</div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginTop:10, paddingTop:10, borderTop:'1px solid rgba(253,245,230,0.12)' }}>
+                  <span style={{ fontSize:12, opacity:.7 }}>Por porción (÷ {calcPorc})</span>
+                  <span style={{ fontFamily:'Playfair Display', fontSize:20, color:'var(--dorado)', fontWeight:700 }}>{rcPeso(precioUnit / calcPorc)}</span>
+                </div>
+                <div style={{ fontSize:11, opacity:.55, marginTop:6 }}>Rinde: {recSel.rinde}</div>
               </div>
               <div style={{ marginTop:14, paddingTop:12, borderTop:'1px solid rgba(253,245,230,0.15)' }}>
                 {[
@@ -2658,6 +2670,10 @@ function PantallaRecetas({ uid }) {
             <div style={{ background:'var(--beige)', borderRadius:10, padding:'11px 14px', fontSize:12, color:'var(--texto2)', marginTop:10, lineHeight:1.5 }}>
               ⚠️ <b>Importante:</b> estos son costos de materia prima solamente. Para el precio real también considerá: gas, mano de obra, packaging y gastos fijos.
             </div>
+            <button onClick={aplicarPrecio}
+              style={{ ...S.btnPrimario, width:'100%', padding:14, marginTop:10, fontSize:14 }}>
+              ✅ Aplicar precio a la receta
+            </button>
           </>
         )}
       </div>
