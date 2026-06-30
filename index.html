@@ -280,6 +280,23 @@ function Header({ titulo, onBack, onAdd, onLogout, subtitulo }) {
   }, []);
 
   const [nombre] = useState(getNombreNegocio);
+
+  // ── Modo formulario: barra compacta con flecha "volver" (sin marca ni fecha) ──
+  if (onBack) {
+    return (
+      <header style={{
+        background: 'var(--chocolate)', color: 'var(--crema)',
+        padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10,
+        position: 'relative', zIndex: 40, boxShadow: '0 2px 12px rgba(44,18,6,0.3)',
+      }}>
+        <button onClick={onBack}
+          style={{ background: 'none', border: 'none', color: 'var(--crema)', fontSize: 22, cursor: 'pointer', lineHeight: 1, flexShrink: 0 }}>←</button>
+        <span style={{ fontFamily: 'Playfair Display', fontSize: 16, fontWeight: 700 }}>{titulo}</span>
+      </header>
+    );
+  }
+
+  // ── Portada de la app: marca + fecha (sin botones) ──
   return (
     <header style={{
       background: 'var(--chocolate)', color: 'var(--crema)',
@@ -288,35 +305,13 @@ function Header({ titulo, onBack, onAdd, onLogout, subtitulo }) {
       position: 'sticky', top: 0, zIndex: 50,
       boxShadow: '0 2px 12px rgba(44,18,6,0.3)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-        {onBack && (
-          <button onClick={onBack}
-            style={{ background: 'none', border: 'none', color: 'var(--crema)', fontSize: 22, cursor: 'pointer', lineHeight: 1, flexShrink: 0 }}>
-            ←
-          </button>
-        )}
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontFamily: 'Playfair Display', fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nombre}</div>
-          <div style={{ fontSize: 11, opacity: 0.7, marginTop: 1 }}>{titulo}{subtitulo ? ' · ' + subtitulo : ''}</div>
-        </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontFamily: 'Playfair Display', fontSize: 17, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nombre}</div>
+        {(titulo || subtitulo) && <div style={{ fontSize: 11, opacity: 0.7, marginTop: 1 }}>{[titulo, subtitulo].filter(Boolean).join(' · ')}</div>}
       </div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <div style={{ textAlign: 'right', marginRight: 4 }}>
-          <div style={{ fontSize: '0.9rem', opacity: 0.85, lineHeight: 1.2 }}>{fecha}</div>
-          <div style={{ fontSize: '0.9rem', fontWeight: 700, lineHeight: 1.2 }}>{hora}</div>
-        </div>
-        {onAdd && (
-          <button onClick={onAdd}
-            style={{ ...S.btnPrimario, padding: '8px 14px', fontSize: 22, lineHeight: 1, borderRadius: 10 }}>
-            +
-          </button>
-        )}
-        {onLogout && (
-          <button onClick={onLogout}
-            style={{ background: 'none', border: '1px solid rgba(253,245,230,0.25)', color: 'var(--crema)', borderRadius: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer' }}>
-            Salir
-          </button>
-        )}
+      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+        <div style={{ fontSize: '0.9rem', opacity: 0.85, lineHeight: 1.2 }}>{fecha}</div>
+        <div style={{ fontSize: '0.9rem', fontWeight: 700, lineHeight: 1.2 }}>{hora}</div>
       </div>
     </header>
   );
@@ -387,6 +382,26 @@ function PantallaAjustes({ onLogout }) {
   const [editando, setEditando] = useState(false);
   const [input, setInput] = useState(nombre);
 
+  // ── Acceso con huella / Face ID ──
+  const [bioOn, setBioOn]   = useState(bioActiva());
+  const [bioMsg, setBioMsg] = useState('');
+  const toggleBio = async () => {
+    setBioMsg('');
+    if (bioOn) {
+      bioDesactivar();
+      setBioOn(false);
+      setBioMsg('Huella desactivada.');
+    } else {
+      try {
+        await bioRegistrar();
+        setBioOn(true);
+        setBioMsg('✅ Listo, ya podés entrar con tu huella.');
+      } catch (e) {
+        setBioMsg('❌ ' + (e.message || 'No se pudo activar.'));
+      }
+    }
+  };
+
   const guardarNombre = () => {
     setNombreNegocio(input.trim() || 'Mi Repostería');
     setNombreState(input.trim() || 'Mi Repostería');
@@ -400,7 +415,6 @@ function PantallaAjustes({ onLogout }) {
 
   return (
     <div style={{ paddingBottom: 80 }}>
-      <Header titulo="⚙️ Ajustes" onLogout={onLogout} />
       <div style={{ padding: '16px' }}>
 
         {/* Nombre del negocio */}
@@ -421,6 +435,25 @@ function PantallaAjustes({ onLogout }) {
               <button onClick={()=>setEditando(true)} style={{ padding: '8px 14px', borderRadius: 10, background: 'var(--beige)', color: 'var(--texto2)', border: 'none', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>✏️ Editar</button>
             </div>
           )}
+        </div>
+
+        {/* Acceso con huella / Face ID */}
+        <div className="card-base" style={{ marginBottom: 16 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--texto2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>🔒 Acceso con huella / Face ID</p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span style={{ fontSize: 13, color: 'var(--texto2)', lineHeight: 1.5, flex: 1 }}>
+              {bioSoportada()
+                ? 'Entrá más rápido con tu huella. El PIN sigue funcionando como respaldo.'
+                : 'Tu dispositivo o navegador no soporta esta función.'}
+            </span>
+            <button onClick={toggleBio} disabled={!bioSoportada()}
+              style={{ width: 54, height: 30, borderRadius: 20, border: 'none', flexShrink: 0,
+                cursor: bioSoportada() ? 'pointer' : 'not-allowed', opacity: bioSoportada() ? 1 : 0.5,
+                background: bioOn ? 'var(--verde)' : 'var(--gris)', position: 'relative', transition: 'background .15s' }}>
+              <span style={{ position: 'absolute', top: 3, left: bioOn ? 27 : 3, width: 24, height: 24, borderRadius: '50%', background: '#fff', transition: 'left .15s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+            </button>
+          </div>
+          {bioMsg && <p style={{ fontSize: 12, marginTop: 10, fontWeight: 600, color: bioMsg.charAt(0) === '❌' ? 'var(--rojo)' : 'var(--verde)' }}>{bioMsg}</p>}
         </div>
 
         {/* Respaldo de datos */}
@@ -461,6 +494,12 @@ function PantallaAjustes({ onLogout }) {
           </div>
         </div>
 
+        {/* Cerrar sesión */}
+        <button onClick={onLogout}
+          style={{ width: '100%', marginTop: 16, padding: '13px', borderRadius: 12, background: 'var(--beige)', color: 'var(--texto)', border: '1px solid var(--gris)', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+          🚪 Salir / Cerrar sesión
+        </button>
+
       </div>
     </div>
   );
@@ -475,32 +514,37 @@ const TABS = [
 ];
 
 function NavBar({ activo, onChange }) {
+  const Tab = ({ id }) => {
+    const t = TABS.find(x => x.id === id);
+    const on = activo === id;
+    return (
+      <button onClick={() => onChange(id)} style={{
+        display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+        padding: '8px 14px', borderRadius: 12,
+        border: on ? '2px solid var(--caramelo)' : '1px solid rgba(253,245,230,0.25)',
+        background: on ? 'var(--caramelo)' : 'transparent',
+        color: 'var(--crema)', fontWeight: on ? 700 : 500, fontSize: 13,
+        transition: 'all .15s', whiteSpace: 'nowrap',
+      }}>
+        <span style={{ fontSize: 16 }}>{t.icon}</span>
+        <span>{t.label}</span>
+      </button>
+    );
+  };
   return (
     <nav style={{
       position: 'fixed', bottom: 0, left: 0, right: 0,
       background: 'var(--chocolate)',
-      display: 'flex', justifyContent: 'space-around',
-      padding: '8px 0 12px',
-      zIndex: 100,
-      boxShadow: '0 -2px 16px rgba(44,18,6,0.25)',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      gap: 6, padding: '8px 12px 12px',
+      zIndex: 100, boxShadow: '0 -2px 16px rgba(44,18,6,0.25)',
     }}>
-      {TABS.map(t => (
-        <button key={t.id} onClick={() => onChange(t.id)}
-          style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-            padding: '4px 10px', borderRadius: 10,
-            opacity: activo === t.id ? 1 : 0.45,
-            transform: activo === t.id ? 'scale(1.12)' : 'scale(1)',
-            transition: 'all 0.18s',
-          }}>
-          <span style={{ fontSize: 20 }}>{t.icon}</span>
-          <span style={{
-            fontSize: 10, color: 'var(--crema)',
-            fontWeight: activo === t.id ? 700 : 400,
-          }}>{t.label}</span>
-        </button>
-      ))}
+      <Tab id="pedidos" />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <BtnEscala/>
+        <BtnDark/>
+      </div>
+      <Tab id="ajustes" />
     </nav>
   );
 }
@@ -517,15 +561,15 @@ function BtnEscala(){
   const [esc,setEsc]=useState(()=>localStorage.getItem('dg_escala')||'M');
   useEffect(()=>{document.documentElement.style.fontSize=ESCALAS[esc]+'px';localStorage.setItem('dg_escala',esc);},[esc]);
   const sig=()=>{const i=orden.indexOf(esc);setEsc(orden[(i+1)%orden.length]);};
-  return <button onClick={sig} style={{position:'fixed',bottom:70,left:12,borderRadius:18,background:'#fff',color:'#374151',fontSize:'0.75rem',fontWeight:700,boxShadow:'0 2px 10px rgba(0,0,0,0.15)',display:'flex',alignItems:'center',gap:4,zIndex:999,border:'1px solid #e5e7eb',cursor:'pointer',padding:'6px 12px'}}>
-    {['S','M','L','XL'].map(s=><span key={s} style={{opacity:s===esc?1:0.3,fontWeight:s===esc?800:500}}>{s}</span>)}
+  return <button onClick={sig} style={{borderRadius:18,background:'rgba(253,245,230,0.12)',color:'var(--crema)',fontSize:'0.72rem',fontWeight:700,display:'flex',alignItems:'center',gap:4,border:'1px solid rgba(253,245,230,0.25)',cursor:'pointer',padding:'7px 11px'}}>
+    {['S','M','L','XL'].map(s=><span key={s} style={{opacity:s===esc?1:0.4,fontWeight:s===esc?800:500}}>{s}</span>)}
   </button>;
 }
 
 function BtnDark(){
   const [dark,setDark]=useState(()=>localStorage.getItem('dg_dark')==='1');
   useEffect(()=>{document.documentElement.style.filter=dark?'invert(1) hue-rotate(180deg)':'';document.querySelectorAll('img,video').forEach(el=>el.style.filter=dark?'invert(1) hue-rotate(180deg)':'');localStorage.setItem('dg_dark',dark?'1':'0');},[dark]);
-  return <button onClick={()=>setDark(d=>!d)} style={{position:'fixed',bottom:70,left:80,borderRadius:18,background:'#fff',color:'#374151',fontSize:'0.8rem',fontWeight:700,boxShadow:'0 2px 10px rgba(0,0,0,0.15)',zIndex:999,border:'1px solid #e5e7eb',cursor:'pointer',padding:'6px 12px'}}>
+  return <button onClick={()=>setDark(d=>!d)} style={{borderRadius:18,background:'rgba(253,245,230,0.12)',color:'var(--crema)',fontSize:'0.95rem',fontWeight:700,border:'1px solid rgba(253,245,230,0.25)',cursor:'pointer',padding:'5px 10px'}}>
     {dark?'☀️':'🌙'}
   </button>;
 }
@@ -535,6 +579,58 @@ function getDeviceIdRepos() {
   let id = localStorage.getItem("repos_device_id");
   if(!id){ id="dev_"+Math.random().toString(36).slice(2)+Date.now().toString(36); localStorage.setItem("repos_device_id",id); }
   return id;
+}
+
+// ── Acceso por biometría (huella / Face ID) con WebAuthn ──────────
+function bioSoportada() {
+  return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create);
+}
+function bioActiva() {
+  return localStorage.getItem('dg_bio_on') === '1' && !!localStorage.getItem('dg_bio_cred');
+}
+function _bioB64(buf)  { return btoa(String.fromCharCode.apply(null, new Uint8Array(buf))); }
+function _bioDesB64(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+
+async function bioRegistrar() {
+  if (!bioSoportada()) throw new Error('Este dispositivo o navegador no soporta huella/Face ID.');
+  const challenge = new Uint8Array(32); crypto.getRandomValues(challenge);
+  const userId    = new Uint8Array(16); crypto.getRandomValues(userId);
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      challenge,
+      rp: { name: 'Dulce Gestión' },
+      user: { id: userId, name: 'dueno', displayName: 'Dueño' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+      timeout: 60000,
+      attestation: 'none',
+    }
+  });
+  if (!cred) throw new Error('No se pudo registrar la huella.');
+  localStorage.setItem('dg_bio_cred', _bioB64(cred.rawId));
+  localStorage.setItem('dg_bio_on', '1');
+  return true;
+}
+
+async function bioVerificar() {
+  const credId = localStorage.getItem('dg_bio_cred');
+  if (!credId) throw new Error('No hay huella registrada.');
+  const challenge = new Uint8Array(32); crypto.getRandomValues(challenge);
+  const ok = await navigator.credentials.get({
+    publicKey: {
+      challenge,
+      allowCredentials: [{ type: 'public-key', id: _bioDesB64(credId), transports: ['internal'] }],
+      userVerification: 'required',
+      timeout: 60000,
+    }
+  });
+  if (!ok) throw new Error('No se pudo verificar la huella.');
+  return true;
+}
+
+function bioDesactivar() {
+  localStorage.removeItem('dg_bio_on');
+  localStorage.removeItem('dg_bio_cred');
 }
 
   // ── Brevo email ─────────────────────────────────────────────────
@@ -694,12 +790,26 @@ function PantallaPinRepos({pin, onOk}) {
   const [error, setError]     = useState("");
   const [intentos, setIntentos] = useState(0);
   const [bloqueado, setBloqueado] = useState(false);
+  const [bioErr, setBioErr]   = useState("");
+  const bioHabilitada = bioActiva();
+  const entrarBio = async () => {
+    setBioErr("");
+    try { await bioVerificar(); onOk(); }
+    catch (e) { setBioErr("No se pudo leer la huella. Probá de nuevo o usá el PIN."); }
+  };
   const lic = getLicenciaRepos();
   const teclas = [1,2,3,4,5,6,7,8,9,"","0","⌫"];
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,background:"var(--crema)"}}>
       <div style={{fontSize:48}}>🍰</div>
       <h2 style={{color:"var(--chocolate)",margin:0}}>{lic?.negocio||"Dulce Gestión"}</h2>
+      {bioHabilitada && !bloqueado && (
+        <button onClick={entrarBio}
+          style={{display:"flex",alignItems:"center",gap:8,padding:"13px 24px",borderRadius:14,border:"2px solid var(--chocolate)",background:"var(--superficie)",color:"var(--chocolate)",fontSize:15,fontWeight:700,cursor:"pointer"}}>
+          🔓 Entrar con huella
+        </button>
+      )}
+      {bioErr && <p style={{color:"var(--rojo)",fontSize:12,textAlign:"center",maxWidth:260}}>{bioErr}</p>}
       <p style={{color:"var(--texto2)",fontSize:14}}>Ingresá tu PIN de acceso</p>
       <div style={{display:"flex",gap:14}}>
         {[0,1,2,3].map(i=><div key={i} style={{width:16,height:16,borderRadius:"50%",background:intento.length>i?"var(--chocolate)":"transparent",border:"2px solid var(--chocolate)"}}/>)}
@@ -800,7 +910,10 @@ function PantallaPedidos({ uid }) {
 
   return (
     <div>
-      <Header titulo="📋 Pedidos" onAdd={() => setForm({})} onLogout={() => auth.signOut()} subtitulo="Dulce Gestión 🍰" />
+      {/* Botón nuevo encargo */}
+      <div style={{ padding: '12px 16px 0' }}>
+        <button onClick={() => setForm({})} style={{ ...S.btnPrimario, width: '100%', padding: '11px', borderRadius: 12, fontSize: 14 }}>+ Nuevo encargo</button>
+      </div>
 
       {/* Filtros */}
       <div style={{ padding: '12px 16px 4px', display: 'flex', gap: 8 }}>
@@ -2898,7 +3011,7 @@ ${texto}`
 
   return (
     <div>
-      <Header titulo="🍰 Recetas" onAdd={() => subTab==='stock' ? setModIngr({}) : subTab==='recetas' ? setModRec({}) : null} />
+      {/* Sub-pestañas Recetas / Stock */}
       <SubTab />
       {subTab === 'recetas'        && <TabRecetas />}
       {subTab === 'stock'          && <TabStock />}
@@ -3055,7 +3168,7 @@ function PantallaPlanificacion({ uid, ingBase, recBase }) {
 
   return (
     <div style={{ paddingBottom:80 }}>
-      <Header titulo="📐 Planificación" subtitulo={new Date().toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short'})} />
+      {/* Planificación del día */}
 
       <div style={{ padding:'12px 16px' }}>
 
@@ -3611,7 +3724,6 @@ function PantallaProductos({ uid, ingBase, recBase }) {
 
   if (planItems.length === 0) return (
     <div style={{paddingBottom:80}}>
-      <Header titulo="🧁 Productos" />
       <div style={{textAlign:'center',padding:'60px 24px'}}>
         <div style={{fontSize:48,marginBottom:12}}>📐</div>
         <p style={{fontWeight:600,color:'var(--texto)',marginBottom:8}}>No hay planificación para hoy</p>
@@ -3622,7 +3734,6 @@ function PantallaProductos({ uid, ingBase, recBase }) {
 
   if (productosDelDia.length === 0) return (
     <div style={{paddingBottom:80}}>
-      <Header titulo="🧁 Productos" />
       <div style={{textAlign:'center',padding:'40px 24px'}}>
         <div style={{fontSize:48,marginBottom:12}}>💰</div>
         <p style={{fontWeight:600,color:'var(--texto)',marginBottom:8}}>Falta definir los precios</p>
@@ -3637,7 +3748,6 @@ function PantallaProductos({ uid, ingBase, recBase }) {
 
   return (
     <div style={{paddingBottom:80}}>
-      <Header titulo="🧁 Productos del día" />
       {(planItems||[]).some(i=>(i.disponible||0)>0) && (
         <div style={{margin:'8px 16px 0'}}>
           <button onClick={liquidarSobrantes}
@@ -3875,7 +3985,7 @@ function PantallaResumen({ uid, ingBase, recBase }) {
 
   return (
     <div style={{paddingBottom:80}}>
-      <Header titulo="📊 Resumen financiero" />
+      {/* Resumen financiero */}
 
       {/* Selector período */}
       <div style={{display:'flex',background:'var(--beige)',borderRadius:12,margin:'10px 16px 0',padding:4,gap:4}}>
@@ -4100,7 +4210,10 @@ function PantallaCaja({ uid }) {
 
   return (
     <div style={{ paddingBottom: 80 }}>
-      <Header titulo="💰 Caja" onAdd={() => setForm({})} />
+      {/* Botón nuevo movimiento */}
+      <div style={{ padding: '12px 16px 0' }}>
+        <button onClick={() => setForm({})} style={{ ...S.btnPrimario, width: '100%', padding: '11px', borderRadius: 12, fontSize: 14 }}>+ Nuevo movimiento</button>
+      </div>
 
       {/* Selector período */}
       <div style={{ display: 'flex', background: 'var(--beige)', borderRadius: 12, margin: '10px 16px 0', padding: 4, gap: 4 }}>
@@ -4395,9 +4508,10 @@ function App() {
   };
 
   return (
-    <div style={{ paddingBottom: 72 }}>
+    <div style={{ paddingBottom: 84 }}>
+      <Header titulo="Dulce Gestión 🍰" />
       {pantallas[tab] || pantallas.pedidos}
-      <BtnEscala/><BtnDark/><NavBar activo={tab} onChange={setTab} />
+      <NavBar activo={tab} onChange={setTab} />
     </div>
   );
 }
