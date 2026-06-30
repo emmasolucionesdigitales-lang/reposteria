@@ -302,7 +302,7 @@ function Header({ titulo, onBack, onAdd, onLogout, subtitulo }) {
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <div style={{ textAlign: 'right', marginRight: 4 }}>
-          <div style={{ fontSize: '0.7rem', opacity: 0.7, lineHeight: 1.2 }}>{fecha}</div>
+          <div style={{ fontSize: '0.9rem', opacity: 0.85, lineHeight: 1.2 }}>{fecha}</div>
           <div style={{ fontSize: '0.9rem', fontWeight: 700, lineHeight: 1.2 }}>{hora}</div>
         </div>
         {onAdd && (
@@ -470,13 +470,8 @@ function PantallaAjustes({ onLogout }) {
 // COMPONENTE: NAV BAR (barra inferior)
 // ══════════════════════════════════════════════════════
 const TABS = [
-  { id: 'productos',     icon: '🧁', label: 'Productos'  },
-  { id: 'pedidos',       icon: '📋', label: 'Pedidos'    },
-  { id: 'caja',          icon: '💰', label: 'Caja'       },
-  { id: 'planificacion', icon: '📐', label: 'Plan'       },
-  { id: 'recetas',       icon: '🍰', label: 'Recetas'    },
-  { id: 'resumen',       icon: '📊', label: 'Resumen'    },
-  { id: 'ajustes',       icon: '⚙️', label: 'Config.'   },
+  { id: 'pedidos', icon: '📋', label: 'Pedidos' },
+  { id: 'ajustes', icon: '⚙️', label: 'Config.' },
 ];
 
 function NavBar({ activo, onChange }) {
@@ -740,6 +735,16 @@ function PantallaPedidos({ uid }) {
   const [cargando, setCarga]  = useState(true);
   const [filtro, setFiltro]   = useState('activos');
 
+  // ── Recetas (para cargar encargos rápido) ──
+  const loadRecPick = () => { try { return JSON.parse(localStorage.getItem('dg_rc_rec')) || REC_DEFAULT_RC; } catch { return REC_DEFAULT_RC; } };
+  const [recetas, setRecetas] = useState(loadRecPick);
+  useEffect(() => {
+    if (!uid) return;
+    db.collection(`reposteria/${uid}/recetas`).doc('recetario').get()
+      .then(snap => { if (snap.exists && snap.data().data?.length) setRecetas(snap.data().data); })
+      .catch(() => {});
+  }, [uid]);
+
   const col = db.collection(`reposteria/${uid}/pedidos`);
 
   useEffect(() => {
@@ -752,8 +757,28 @@ function PantallaPedidos({ uid }) {
 
   const guardar = async (datos) => {
     const { id, ...resto } = datos;
-    if (id) await col.doc(id).update({ ...resto, updatedAt: new Date() });
-    else    await col.add({ ...resto, createdAt: new Date(), updatedAt: new Date() });
+    if (id) {
+      await col.doc(id).update({ ...resto, updatedAt: new Date() });
+    } else {
+      const ahora = new Date();
+      const fechaCreado = ahora.toISOString().slice(0, 10);
+      const horaCreado  = ahora.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+      await col.add({ ...resto, fechaCreado, horaCreado, createdAt: ahora, updatedAt: ahora });
+      // ── Si el encargo tiene seña, entra sola a la Caja ──
+      if (Number(resto.sena) > 0) {
+        await db.collection(`reposteria/${uid}/caja`).add({
+          tipo: 'ingreso',
+          categoria: 'sena',
+          concepto: 'Seña — ' + (resto.clienteNombre || '') + (resto.producto ? ' (' + resto.producto + ')' : ''),
+          monto: Number(resto.sena) || 0,
+          formaPago: resto.formaPagoSena || 'efectivo',
+          fecha: fechaCreado,
+          hora: horaCreado,
+          origen: 'encargo',
+          createdAt: ahora,
+        });
+      }
+    }
     setForm(null);
   };
 
@@ -767,7 +792,7 @@ function PantallaPedidos({ uid }) {
   };
 
   if (form !== null) {
-    return <FormularioPedido inicial={form} onGuardar={guardar} onCancelar={() => setForm(null)} />;
+    return <FormularioPedido inicial={form} recetas={recetas} onGuardar={guardar} onCancelar={() => setForm(null)} />;
   }
 
   const activos  = pedidos.filter(p => p.estado !== 'entregado' && p.estado !== 'cancelado');
@@ -885,6 +910,11 @@ function TarjetaPedido({ pedido, onEditar, onEstado, onEliminar }) {
       {/* Detalle expandido */}
       {abierto && (
         <div style={{ padding: '0 16px 14px', borderTop: '1px solid var(--beige)' }}>
+          {pedido.fechaCreado && (
+            <p style={{ fontSize: 12, color: 'var(--texto2)', margin: '10px 0 0' }}>
+              🕒 Encargo tomado el {formatFecha(pedido.fechaCreado)}{pedido.horaCreado ? ' · ' + pedido.horaCreado + ' hs' : ''}
+            </p>
+          )}
           {pedido.descripcion && (
             <p style={{ fontSize: 13, color: 'var(--texto2)', margin: '10px 0 6px', fontStyle: 'italic' }}>
               "{pedido.descripcion}"
@@ -990,14 +1020,28 @@ function TarjetaPedido({ pedido, onEditar, onEstado, onEliminar }) {
 // ══════════════════════════════════════════════════════
 // FORMULARIO PEDIDO (nuevo / editar)
 // ══════════════════════════════════════════════════════
-function FormularioPedido({ inicial, onGuardar, onCancelar }) {
+function FormularioPedido({ inicial, recetas = [], onGuardar, onCancelar }) {
   const [d, setD] = useState({
     clienteNombre: '', telefono: '', producto: '',
     descripcion: '', fechaEntrega: '', precio: '',
-    sena: '', estado: 'pendiente', extras: [],
+    sena: '', estado: 'pendiente', extras: [], formaPagoSena: 'efectivo',
     ...inicial,
   });
   const set = (k, v) => setD(prev => ({ ...prev, [k]: v }));
+
+  // ── Cargar datos desde una receta (autocompleta producto, descripción y precio) ──
+  const [recSinPrecio, setRecSinPrecio] = useState(false);
+  const cargarDesdeReceta = (recetaId) => {
+    const r = recetas.find(x => x.id === recetaId);
+    if (!r) return;
+    setRecSinPrecio(!r.precioVenta);
+    setD(prev => ({
+      ...prev,
+      producto: r.nombre || prev.producto,
+      descripcion: r.descripcion || prev.descripcion,
+      precio: r.precioVenta ? String(r.precioVenta) : prev.precio,
+    }));
+  };
 
   // ── Extras (decoración, impresión, caja, etc.) ──
   const EXTRAS_SUGERIDOS = ['🖨️ Impresión comestible','🎁 Caja/packaging','🎂 Piso extra','✨ Fondant','🎨 Decoración personalizada','🚚 Envío a domicilio'];
@@ -1035,6 +1079,30 @@ function FormularioPedido({ inicial, onGuardar, onCancelar }) {
     <div>
       <Header titulo={d.id ? '✏️ Editar Pedido' : '+ Nuevo Encargo'} onBack={onCancelar} />
       <div style={{ padding: '16px 16px 110px' }}>
+
+        {/* Cargar rápido desde una receta */}
+        {recetas.length > 0 && (
+          <div style={{ background:'var(--dorado)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
+            <p style={{ fontSize:12, fontWeight:700, color:'var(--chocolate)', textTransform:'uppercase', marginBottom:8 }}>⚡ Cargar desde receta</p>
+            <select value="" onChange={e => cargarDesdeReceta(e.target.value)}
+              style={{ width:'100%', padding:'11px 12px', borderRadius:10, border:'1.5px solid var(--caramelo)', background:'var(--superficie)', color:'var(--texto)', fontSize:14, cursor:'pointer' }}>
+              <option value="">Elegí una receta…</option>
+              {recetas.map(r => (
+                <option key={r.id} value={r.id}>
+                  {(r.emoji||'🍰') + ' ' + r.nombre + (r.rinde ? ' — ' + r.rinde : '')}
+                </option>
+              ))}
+            </select>
+            <p style={{ fontSize:11, color:'var(--cacao)', marginTop:6 }}>
+              Completa producto, descripción y precio. Después ajustás lo que quieras.
+            </p>
+            {recSinPrecio && (
+              <p style={{ fontSize:11, color:'var(--rojo)', marginTop:4, fontWeight:600 }}>
+                ⚠️ Esa receta todavía no tiene precio de venta. Cargáselo en Recetas para que se complete solo.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Datos del cliente */}
         <div style={{ background:'var(--beige)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
@@ -1117,6 +1185,21 @@ function FormularioPedido({ inicial, onGuardar, onCancelar }) {
         <div style={{ background:'var(--beige)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
           <p style={{ fontSize:12, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', marginBottom:8 }}>💵 Pago</p>
           <Campo label="Seña / Adelanto ($)" value={d.sena} onChange={v => set('sena', v)} placeholder="0" tipo="number" />
+          {Number(d.sena) > 0 && !d.id && (
+            <div style={{ marginTop: 4 }}>
+              <label style={{ ...S.label, fontSize: 12 }}>Forma de pago de la seña (entra a la Caja)</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 4 }}>
+                {[['efectivo','💵 Efectivo'],['transferencia','📱 Transfer.'],['debito','💳 Débito'],['credito','💳 Crédito']].map(([k, l]) => (
+                  <button key={k} onClick={() => set('formaPagoSena', k)} style={{
+                    padding: '8px 4px', borderRadius: 9, fontSize: 12,
+                    fontWeight: d.formaPagoSena === k ? 700 : 400,
+                    border: d.formaPagoSena === k ? '2px solid var(--caramelo)' : '1px solid var(--beige2)',
+                    background: d.formaPagoSena === k ? 'var(--superficie)' : 'none', color: 'var(--texto)', cursor: 'pointer',
+                  }}>{l}</button>
+                ))}
+              </div>
+            </div>
+          )}
           {totalFinal > 0 && (
             <div style={{ display:'flex', justifyContent:'space-between', background:'var(--superficie)', borderRadius:10, padding:'10px 12px', marginTop:6, fontSize:13 }}>
               <span style={{ color:'var(--texto2)' }}>Saldo restante</span>
@@ -2553,6 +2636,7 @@ function PantallaRecetas({ uid }) {
     const [rinde,     setRinde]    = useState(modRec ? modRec.rinde||'' : '');
     const [tipo,      setTipo]     = useState(modRec ? modRec.tipo||'delicia' : 'delicia');
     const [rinde_num, setRindeNum] = useState(modRec ? modRec.rinde_num||0 : 0);
+    const [precioVenta, setPrecioVenta] = useState(modRec ? modRec.precioVenta||'' : '');
     const [checks, setChecks]   = useState(() => {
       const m = {};
       (modRec && modRec.ingredientes || []).forEach(ir => { m[ir.ingId] = ir.cantidad; });
@@ -2572,7 +2656,7 @@ function PantallaRecetas({ uid }) {
       const ingredientes = Object.entries(checks)
         .filter(([,v]) => v !== undefined)
         .map(([ingId, cantidad]) => ({ ingId, cantidad: parseFloat(cantidad)||0 }));
-      const datos = { nombre: nombre.trim(), emoji: emoji||'🍰', descripcion: desc, rinde, ingredientes };
+      const datos = { nombre: nombre.trim(), emoji: emoji||'🍰', descripcion: desc, rinde, precioVenta: Number(precioVenta)||0, ingredientes };
       if (isEdit) saveRec(rec.map(r => r.id === modRec.id ? {...r,...datos} : r));
       else        saveRec([...rec, { id: uid2(), ...datos }]);
       setModRec(null);
@@ -2606,6 +2690,7 @@ function PantallaRecetas({ uid }) {
             value={rinde_num||''} onChange={v=>setRindeNum(Number(v))} tipo="number"
             placeholder={String(getTipo(tipo).porcionesDefault)} />
           <Campo label="Descripción del rendimiento (opcional)" value={rinde} onChange={setRinde} placeholder="Ej: 8 porciones generosas" />
+          <Campo label="💰 Precio de venta ($) — se usa al cargar pedidos" value={precioVenta} onChange={setPrecioVenta} tipo="number" placeholder="Ej: 12000" />
           <label style={S.label}>✅ Ingredientes y cantidades</label>
           <div style={{ maxHeight:'32vh', overflowY:'auto', border:'1.5px solid var(--beige)', borderRadius:10, padding:'4px 12px', marginBottom:6 }}>
             {ing.map(item => {
@@ -3471,10 +3556,11 @@ function PantallaProductos({ uid, ingBase, recBase }) {
 
   const confirmar = async () => {
     if (!carrito.length) return;
+    const horaVenta = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
     // Guardar pedido
     await db.collection(`reposteria/${uid}/pedidos`).add({
       fecha: hoy(),
-      hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+      hora: horaVenta,
       tipo: 'mostrador',
       items: carrito.map(i=>({ nombre:`${i.emoji} ${i.nombre}`, opcion:i.opLabel, precio:i.precio, cantidad:i.cantidad, subtotal:i.precio*i.cantidad })),
       total, pago, entrega,
@@ -3486,6 +3572,18 @@ function PantallaProductos({ uid, ingBase, recBase }) {
         hora:    clienteHora.trim(),
         nota:    clienteNota.trim(),
       },
+    });
+    // ── La venta entra sola a la Caja con su forma de pago ──
+    await db.collection(`reposteria/${uid}/caja`).add({
+      tipo: 'ingreso',
+      categoria: 'venta',
+      concepto: 'Venta mostrador' + (clienteNombre.trim() ? ' — ' + clienteNombre.trim() : ''),
+      monto: total,
+      formaPago: pago,
+      fecha: hoy(),
+      hora: horaVenta,
+      origen: 'mostrador',
+      createdAt: new Date(),
     });
     // Limpiar datos del cliente
     setClienteNombre(''); setClienteTel(''); setClienteDir(''); setClienteHora(''); setClienteNota('');
@@ -4216,13 +4314,73 @@ function FormularioMovimiento({ inicial, pedidos, onGuardar, onCancelar }) {
   );
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// SUB-NAVEGACIÓN (hub): permite agrupar pantallas dentro de una pestaña
+// ══════════════════════════════════════════════════════════════════════
+function HubToggle({ opciones, activo, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 6, padding: '10px 16px 2px' }}>
+      {opciones.map(([k, l]) => (
+        <button key={k} onClick={() => onChange(k)} style={{
+          flex: 1, padding: '9px 6px', borderRadius: 10, cursor: 'pointer', fontSize: 13,
+          fontWeight: activo === k ? 700 : 500,
+          border: activo === k ? '2px solid var(--caramelo)' : '1px solid var(--beige)',
+          background: activo === k ? 'var(--beige)' : 'transparent',
+          color: 'var(--texto)', transition: 'all .15s',
+        }}>{l}</button>
+      ))}
+    </div>
+  );
+}
+
+// Pestaña PEDIDOS → contiene Encargos + Día (Planificar/Vender) + Recetas
+function HubPedidos({ uid, ingBase, recBase }) {
+  const [sub, setSub] = useState('pedidos');
+  return (
+    <div>
+      <HubToggle opciones={[['pedidos', '📋 Encargos'], ['dia', '📅 Día'], ['recetas', '🍰 Recetas']]} activo={sub} onChange={setSub} />
+      {sub === 'pedidos' && <PantallaPedidos uid={uid} />}
+      {sub === 'dia'     && <PantallaDia uid={uid} ingBase={ingBase} recBase={recBase} />}
+      {sub === 'recetas' && <PantallaRecetas uid={uid} />}
+    </div>
+  );
+}
+
+// Sección DÍA → une Planificación (Planificar) + Productos del día (Vender)
+function PantallaDia({ uid, ingBase, recBase }) {
+  const [paso, setPaso] = useState('planificar');
+  return (
+    <div>
+      <HubToggle opciones={[['planificar', '📐 Planificar'], ['vender', '🧁 Vender']]} activo={paso} onChange={setPaso} />
+      {paso === 'planificar'
+        ? <PantallaPlanificacion uid={uid} ingBase={ingBase} recBase={recBase} />
+        : <PantallaProductos uid={uid} ingBase={ingBase} recBase={recBase} />}
+    </div>
+  );
+}
+
+// (HubRecetas eliminado: Recetas y Planificación ahora viven dentro de Pedidos)
+
+// Pestaña CONFIG → contiene Configuración + Caja + Resumen
+function HubConfig({ uid, ingBase, recBase, onLogout }) {
+  const [sub, setSub] = useState('ajustes');
+  return (
+    <div>
+      <HubToggle opciones={[['ajustes', '⚙️ Config'], ['caja', '💰 Caja'], ['resumen', '📊 Resumen']]} activo={sub} onChange={setSub} />
+      {sub === 'ajustes' && <PantallaAjustes onLogout={onLogout} />}
+      {sub === 'caja'    && <PantallaCaja uid={uid} />}
+      {sub === 'resumen' && <PantallaResumen uid={uid} ingBase={ingBase} recBase={recBase} />}
+    </div>
+  );
+}
+
 function App() {
   const [fase, setFase] = useState(()=>{
     const lic = getLicenciaRepos();
     if(!lic||!lic.activado) return "activacion";
     return "pin";
   });
-  const [tab, setTab] = useState('productos');
+  const [tab, setTab] = useState('pedidos');
 
   if(fase==="activacion") return <PantallaActivacionRepos onActivado={pin=>{ setFase("pin"); }} />;
   const lic = getLicenciaRepos();
@@ -4232,13 +4390,8 @@ function App() {
   const recBase = REC_DEFAULT_RC;
   const uid = (getLicenciaRepos()?.deviceId) || "default";
   const pantallas = {
-    productos:     <PantallaProductos    uid={uid} ingBase={ingBase} recBase={recBase} />,
-    pedidos:       <PantallaPedidos      uid={uid} />,
-    caja:          <PantallaCaja         uid={uid} />,
-    recetas:       <PantallaRecetas      uid={uid} />,
-    resumen:       <PantallaResumen      uid={uid} ingBase={ingBase} recBase={recBase} />,
-    planificacion: <PantallaPlanificacion uid={uid} ingBase={ingBase} recBase={recBase} />,
-    ajustes:       <PantallaAjustes      onLogout={() => auth.signOut()} />,
+    pedidos:  <HubPedidos uid={uid} ingBase={ingBase} recBase={recBase} />,
+    ajustes:  <HubConfig uid={uid} ingBase={ingBase} recBase={recBase} onLogout={() => auth.signOut()} />,
   };
 
   return (
