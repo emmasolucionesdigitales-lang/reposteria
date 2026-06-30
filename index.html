@@ -24,16 +24,16 @@
 
   <style>
     :root {
-      --chocolate:  #2C1206;
-      --cacao:      #5C2E14;
-      --caramelo:   #A0622A;
-      --dorado:     #C9963C;
-      --crema:      #FBF5E6;
-      --beige:      #EDD9B0;
-      --beige2:     #E0C49A;
-      --superficie: #FFFCF4;
-      --texto:      #1E0E04;
-      --texto2:     #6B4530;
+      --chocolate:  #2A2520;
+      --cacao:      #463E36;
+      --caramelo:   #A07B4F;
+      --dorado:     #C7AE86;
+      --crema:      #F5F3EF;
+      --beige:      #E6E1D8;
+      --beige2:     #E6E1D8;
+      --superficie: #FFFFFF;
+      --texto:      #211C17;
+      --texto2:     #6F665B;
       --verde:      #27AE60;
       --rojo:       #C0392B;
       --naranja:    #E67E22;
@@ -234,17 +234,13 @@ const getTipo = (id) => TIPOS_PRODUCTO.find(t=>t.id===id) || TIPOS_PRODUCTO[TIPO
 
 // ── TEMAS DE COLORES ─────────────────────────────────────────────────
 const TEMAS_DG = {
-  chocolate: { nombre:'🍫 Chocolate', chocolate:'#2C1206', cacao:'#5C2E14', caramelo:'#A0622A', dorado:'#C9963C', crema:'#FBF5E6', beige:'#EDD9B0', superficie:'#FFFCF4', texto:'#1E0E04', texto2:'#6B4530' },
-  rosa:      { nombre:'🌸 Rosa',       chocolate:'#831843', cacao:'#9D174D', caramelo:'#DB2777', dorado:'#F472B6', crema:'#FFF1F8', beige:'#FECDD3', superficie:'#FFF8FB', texto:'#500724', texto2:'#9D174D' },
-  violeta:   { nombre:'💜 Violeta',    chocolate:'#3B0764', cacao:'#4C1D95', caramelo:'#7C3AED', dorado:'#A78BFA', crema:'#F5F3FF', beige:'#DDD6FE', superficie:'#FDFCFF', texto:'#1E0B3B', texto2:'#5B21B6' },
-  menta:     { nombre:'🌿 Menta',      chocolate:'#064E3B', cacao:'#065F46', caramelo:'#059669', dorado:'#34D399', crema:'#ECFDF5', beige:'#A7F3D0', superficie:'#F0FDF9', texto:'#022C22', texto2:'#065F46' },
-  fresa:     { nombre:'🍓 Fresa',      chocolate:'#7F1D1D', cacao:'#991B1B', caramelo:'#DC2626', dorado:'#F87171', crema:'#FEF2F2', beige:'#FECACA', superficie:'#FFF8F8', texto:'#450A0A', texto2:'#991B1B' },
-  vainilla:  { nombre:'🍦 Vainilla',   chocolate:'#78350F', cacao:'#92400E', caramelo:'#D97706', dorado:'#FCD34D', crema:'#FFFBEB', beige:'#FDE68A', superficie:'#FFFFFF', texto:'#1C1917', texto2:'#78350F' },
-  noche:     { nombre:'🌙 Noche',      chocolate:'#0F172A', cacao:'#1E293B', caramelo:'#6366F1', dorado:'#818CF8', crema:'#F1F5F9', beige:'#334155', superficie:'#1E293B', texto:'#F8FAFC', texto2:'#94A3B8' },
+  lino:    { nombre:'🪵 Lino',    chocolate:'#2A2520', cacao:'#463E36', caramelo:'#A07B4F', dorado:'#C7AE86', crema:'#F5F3EF', beige:'#E6E1D8', superficie:'#FFFFFF', texto:'#211C17', texto2:'#6F665B' },
+  pizarra: { nombre:'🪨 Pizarra', chocolate:'#1F242C', cacao:'#353C46', caramelo:'#4E6E87', dorado:'#8AA6BB', crema:'#F2F4F6', beige:'#E1E5EA', superficie:'#FFFFFF', texto:'#1A1F26', texto2:'#586472' },
+  salvia:  { nombre:'🌿 Salvia',  chocolate:'#2A302B', cacao:'#3F4A41', caramelo:'#6F9075', dorado:'#A1B6A5', crema:'#F4F6F2', beige:'#E2E7DF', superficie:'#FFFFFF', texto:'#1C211D', texto2:'#5B645C' },
 };
 
 function aplicarTema(id) {
-  const t = TEMAS_DG[id] || TEMAS_DG.chocolate;
+  const t = TEMAS_DG[id] || TEMAS_DG.lino;
   const r = document.documentElement.style;
   r.setProperty('--chocolate',  t.chocolate);
   r.setProperty('--cacao',      t.cacao);
@@ -261,7 +257,7 @@ function aplicarTema(id) {
 }
 
 // Aplicar tema guardado al cargar
-(()=>{ aplicarTema(localStorage.getItem('dg_tema')||'chocolate'); })();
+(()=>{ aplicarTema(localStorage.getItem('dg_tema')||'lino'); })();
 
 // Nombre del negocio
 const getNombreNegocio = () => localStorage.getItem('dg_nombre') || 'Mi Repostería';
@@ -378,7 +374,7 @@ async function restaurarRespaldoRepos(file){
 }
 function PantallaAjustes({ onLogout }) {
   const [nombre, setNombreState] = useState(getNombreNegocio());
-  const [temaActual, setTemaActual] = useState(()=>localStorage.getItem('dg_tema')||'chocolate');
+  const [temaActual, setTemaActual] = useState(()=>localStorage.getItem('dg_tema')||'lino');
   const [editando, setEditando] = useState(false);
   const [input, setInput] = useState(nombre);
 
