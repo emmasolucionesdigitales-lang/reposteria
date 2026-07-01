@@ -2156,869 +2156,6 @@ function PantallaRecetas({ uid }) {
   );
 }
 
-// ══════════════════════════════════════════════════════
-// APP PRINCIPAL
-
-
-// ══════════════════════════════════════════════════════════════════════
-// PANTALLA: PLANIFICACIÓN DE VENTA
-// Planilla diaria basada en recetas → genera los productos del día
-// ══════════════════════════════════════════════════════════════════════
-function PantallaPlanificacion({ uid, ingBase, recBase }) {
-  const hoy = () => new Date().toISOString().slice(0,10);
-  const [stock,      setStock]      = useState([]);
-  const [formItems,  setFormItems]  = useState([]);  // formulario actual (editable)
-  const [savedItems, setSavedItems] = useState([]);  // guardado en Firebase hoy (solo lectura)
-  const [guardado,   setGuardado]   = useState(false);
-  const [editOpciones, setEditOpciones] = useState(null);
-  const [sinPrecio,  setSinPrecio]  = useState(null);
-
-  useEffect(() => {
-    const u1 = db.collection(`reposteria/${uid}/stock`).orderBy('nombre','asc')
-      .onSnapshot(snap => setStock(snap.docs.map(d=>({id:d.id,...d.data()}))));
-    const u2 = db.collection(`reposteria/${uid}/planificacion`).doc(hoy())
-      .onSnapshot(snap => {
-        // Solo actualiza savedItems — NUNCA sobreescribe el formulario
-        setSavedItems(snap.exists ? (snap.data().items||[]) : []);
-      });
-    return () => { u1(); u2(); };
-  }, [uid]);
-
-  // ── Helpers ────────────────────────────────────────────────────────
-  const getItem = (recId) => formItems.find(i=>i.recetaId===recId);
-
-  const setCantidad = (rec, cant) => {
-    cant = Math.max(0, cant);
-    setFormItems(prev => {
-      const existe = prev.find(i=>i.recetaId===rec.id);
-      if (existe) {
-        if (cant === 0) return prev.filter(i=>i.recetaId!==rec.id);
-        return prev.map(i=>i.recetaId===rec.id ? {...i, cantidad:cant} : i);
-      }
-      if (cant === 0) return prev;
-      return [...prev, {
-        recetaId: rec.id, recetaNombre: rec.nombre, recetaEmoji: rec.emoji||'🍰',
-        cantidad: cant,
-        opciones: [{ id:'o'+Date.now(), label:'Por unidad', precio:0 }]
-      }];
-    });
-  };
-
-  const guardarOpciones = (recId, opciones) => {
-    setFormItems(prev => prev.map(i=>i.recetaId===recId ? {...i, opciones} : i));
-    setEditOpciones(null);
-  };
-
-  // ── Calcular ingredientes totales ──────────────────────────────────
-  const calcIngredientes = () => {
-    const tot = {};
-    for (const item of formItems) {
-      const rec = (recBase||[]).find(r=>r.id===item.recetaId);
-      if (!rec) continue;
-      for (const ri of (rec.ingredientes||[])) {
-        tot[ri.ingId] = (tot[ri.ingId]||0) + ri.cantidad * item.cantidad;
-      }
-    }
-    return tot;
-  };
-  const ingNecesarios = calcIngredientes();
-
-  const getStockInfo = (ingId) => {
-    const ing = (ingBase||[]).find(i=>i.id===ingId);
-    if (!ing) return null;
-    const stk = stock.find(s => s.nombre === ing.nombre);
-    const disponible = stk ? Number(stk.cantidad)||0 : 0;
-    return { ing, disponible };
-  };
-
-  const guardar = async () => {
-    // 1. Verificar precios en todos los items
-    const falta = formItems.find(i => !i.opciones || !i.opciones.some(o=>Number(o.precio)>0));
-    if (falta) {
-      setSinPrecio(falta.recetaId);
-      setEditOpciones(falta.recetaId); // abrir modal de precios
-      return;
-    }
-    setSinPrecio(null);
-
-    // 2. Acumular con producción existente del día
-    const snap = await db.collection(`reposteria/${uid}/planificacion`).doc(hoy()).get();
-    const existentes = savedItems; // ya los tenemos en memoria
-
-    const acumulado = [...existentes];
-    for (const nuevo of formItems) {
-      const idx = acumulado.findIndex(e=>e.recetaId===nuevo.recetaId);
-      if (idx >= 0) {
-        // Sumar cantidad y conservar opciones más recientes
-        acumulado[idx] = { ...acumulado[idx], cantidad: acumulado[idx].cantidad + nuevo.cantidad, opciones: nuevo.opciones };
-      } else {
-        acumulado.push(nuevo);
-      }
-    }
-
-    // 3. Calcular disponible de cada item (cantidad × rinde_num de la receta)
-    const acumuladoConDisp = acumulado.map(item => {
-      const rec = (recBase||[]).find(r=>r.id===item.recetaId);
-      const rindeNum = rec?.rinde_num || getTipo(rec?.tipo||'delicia').porcionesDefault;
-      // disponible en unidades base (porciones o piezas individuales)
-      const dispBase = (item.cantidad||1) * rindeNum;
-      return {
-        ...item,
-        rindeNum,
-        disponible: item.disponible !== undefined
-          ? item.disponible + ((item.cantidad||1) * rindeNum - (existentes.find(e=>e.recetaId===item.recetaId)?.cantidad||0) * rindeNum)
-          : dispBase
-      };
-    });
-
-    // 4. Guardar acumulado con disponible
-    await db.collection(`reposteria/${uid}/planificacion`).doc(hoy())
-      .set({ fecha: hoy(), items: acumuladoConDisp });
-
-    // 4. Limpiar el formulario para una nueva producción
-    setFormItems([]);  // limpiar SOLO el formulario, savedItems se actualiza solo por onSnapshot
-    setGuardado(true);
-    setTimeout(() => setGuardado(false), 4000);
-  };
-
-  // ── Modal opciones de venta ────────────────────────────────────────
-  if (editOpciones !== null) {
-    const item = formItems.find(i=>i.recetaId===editOpciones);
-    return <ModalOpciones item={item} ingBase={ingBase} recBase={recBase} onGuardar={ops=>guardarOpciones(editOpciones,ops)} onCancelar={()=>setEditOpciones(null)} />;
-  }
-
-  const hayPlan = formItems.length > 0;
-  // Factor de conversión: receta usa unidad base (g/ml/unidades)
-  // stock usa unidad de compra (kg/litro/docena/unidad)
-  const CONV = { kg:1000, litro:1000, docena:12, unidad:1 };
-  const stockEnBase = (s) => s.disponible * (CONV[s.ing.unidad]||1);
-
-  const hayAlerta = Object.entries(ingNecesarios).some(([ingId, cant]) => {
-    const s = getStockInfo(ingId); if(!s) return false;
-    return cant > stockEnBase(s);
-  });
-
-  return (
-    <div style={{ paddingBottom:80 }}>
-      {/* Planificación del día */}
-
-      <div style={{ padding:'12px 16px' }}>
-
-        {/* ── Planilla de producción ── */}
-        {savedItems.length > 0 && (
-          <div style={{ background:'rgba(39,174,96,0.08)', border:'1px solid rgba(39,174,96,0.2)', borderRadius:10, padding:'9px 14px', marginBottom:12, fontSize:12, color:'var(--verde)', fontWeight:600 }}>
-            ✅ Ya guardado hoy: {savedItems.map(i=>i.recetaNombre).join(', ')}
-          </div>
-        )}
-        <p style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:10 }}>¿Qué más vas a producir?</p>
-
-        <div style={{ background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:14, overflow:'hidden', marginBottom:16 }}>
-          {/* Header tabla */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 90px 40px', gap:0, background:'var(--beige)', padding:'8px 14px', borderBottom:'1px solid var(--beige2)' }}>
-            <span style={{ fontSize:11, fontWeight:700, color:'var(--texto2)' }}>RECETA</span>
-            <span style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textAlign:'center' }}>CANTIDAD</span>
-            <span style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textAlign:'center' }}>💰</span>
-          </div>
-
-          {(recBase||[]).length === 0 && (
-            <div style={{ padding:'24px', textAlign:'center', color:'var(--texto2)', fontSize:14 }}>
-              No hay recetas cargadas. Andá a Recetas y creá las primeras.
-            </div>
-          )}
-
-          {(recBase||[]).map((rec, idx) => {
-            const item = getItem(rec.id);
-            const cant = item ? item.cantidad : 0;
-            const tieneOpciones = item && item.opciones && item.opciones.some(o=>o.precio>0);
-            return (
-              <div key={rec.id} style={{ display:'grid', gridTemplateColumns:'1fr 90px 40px', gap:0, padding:'10px 14px', borderBottom: idx < recBase.length-1 ? '1px solid var(--beige)' : 'none', alignItems:'center', background: cant>0 ? 'rgba(160,98,42,0.05)' : 'transparent' }}>
-                <div>
-                  <span style={{ fontSize:14, fontWeight:cant>0?700:400, color:'var(--texto)' }}>{rec.emoji||'🍰'} {rec.nombre}</span>
-                  {cant>0 && (
-                    <div style={{ fontSize:11, color: tieneOpciones?'var(--verde)':'var(--naranja)', marginTop:2 }}>
-                      {tieneOpciones ? '✅ Precios cargados' : '⚠️ Sin precios de venta'}
-                    </div>
-                  )}
-                </div>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
-                  <button onClick={()=>setCantidad(rec, cant-1)} style={{ width:26, height:26, borderRadius:'50%', border:'1px solid var(--beige2)', background:'none', cursor:'pointer', color:'var(--texto)', fontSize:14 }}>-</button>
-                  <span style={{ fontSize:15, fontWeight:700, color:cant>0?'var(--chocolate)':'var(--texto2)', minWidth:20, textAlign:'center' }}>{cant}</span>
-                  <button onClick={()=>setCantidad(rec, cant+1)} style={{ width:26, height:26, borderRadius:'50%', background:cant>0?'var(--caramelo)':'none', border:'1px solid var(--beige2)', cursor:'pointer', color:cant>0?'white':'var(--texto)', fontSize:14 }}>+</button>
-                </div>
-                <div style={{ textAlign:'center' }}>
-                  {cant>0 && (
-                    <button onClick={()=>setEditOpciones(rec.id)} title="Definir precios de venta"
-                      style={{ width:32, height:32, borderRadius:8, border:'1px solid var(--beige2)', background: tieneOpciones?'var(--verde)':'var(--beige)', color: tieneOpciones?'white':'var(--texto2)', cursor:'pointer', fontSize:14 }}>
-                      💰
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* ── Resumen de ingredientes ── */}
-        {hayPlan && Object.keys(ingNecesarios).length > 0 && (
-          <div style={{ marginBottom:16 }}>
-            <p style={{ fontSize:11, fontWeight:700, color:'var(--texto2)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:8 }}>
-              Ingredientes necesarios {hayAlerta && <span style={{ color:'var(--naranja)' }}>· ⚠️ Falta stock</span>}
-            </p>
-            <div style={{ background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:12, overflow:'hidden' }}>
-              {Object.entries(ingNecesarios).map(([ingId, cant], idx, arr) => {
-                const s = getStockInfo(ingId);
-                if (!s) return null;
-                const factor   = CONV[s.ing.unidad] || 1;
-                const stockBase = s.disponible * factor; // stock en unidad base (g/ml/unid)
-                const falta    = cant > stockBase;
-                // Mostrar en unidad de compra (más legible)
-                const cantStock = cant / factor;
-                const dispStock = s.disponible;
-                const unidLabel = s.ing.unidad;
-                const fmtCant = (v, u) => {
-                  if (u==='kg')    return v>=1 ? v.toFixed(2)+' kg'  : Math.round(v*1000)+'g';
-                  if (u==='litro') return v>=1 ? v.toFixed(2)+' L'   : Math.round(v*1000)+'ml';
-                  if (u==='docena') return v.toFixed(2)+' doc.';
-                  return v.toFixed(2)+' u';
-                };
-                const cantLabel = fmtCant(cantStock, unidLabel);
-                const dispLabel = fmtCant(dispStock, unidLabel);
-                return (
-                  <div key={ingId} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 12px', borderBottom: idx<arr.length-1?'1px solid var(--beige)':'none', background: falta?'rgba(230,126,34,0.06)':'transparent' }}>
-                    <span style={{ fontSize:13, color:'var(--texto)', fontWeight:falta?600:400 }}>{s.ing.nombre}</span>
-                    <div style={{ textAlign:'right' }}>
-                      <span style={{ fontSize:13, fontWeight:600, color:falta?'var(--naranja)':'var(--verde)' }}>{cantLabel} {falta?'⚠️':'✅'}</span>
-                      <div style={{ fontSize:10, color:'var(--texto2)' }}>Stock: {dispLabel}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {guardado && <div style={{ background:'#d4edda', color:'#155724', borderRadius:10, padding:'10px', textAlign:'center', marginBottom:12, fontSize:13 }}>✅ Producción guardada y sumada al día — Formulario listo para nueva producción</div>}
-
-        <button onClick={guardar} disabled={!hayPlan}
-          style={{ ...S.btnPrimario, width:'100%', opacity:hayPlan?1:0.4 }}>
-          Guardar planificación del día
-        </button>
-
-      </div>
-    </div>
-  );
-}
-
-// ── Modal para definir opciones de venta de un producto planificado ──
-function ModalOpciones({ item, ingBase, recBase, onGuardar, onCancelar }) {
-  const CONV = { kg:1000, litro:1000, docena:12, unidad:1 };
-
-  // Costo del batch desde ingredientes
-  const costoReceta = React.useMemo(() => {
-    const rec = (recBase||[]).find(r=>r.id===item.recetaId);
-    if (!rec) return 0;
-    return Math.round((rec.ingredientes||[]).reduce((s,ri)=>{
-      const ing = (ingBase||[]).find(i=>i.id===ri.ingId);
-      if (!ing||!ing.precio) return s;
-      return s + (ri.cantidad/(CONV[ing.unidad]||1)) * ing.precio;
-    },0));
-  },[item.recetaId]);
-
-  // Margen promedio de los ingredientes
-  const margenSug = React.useMemo(() => {
-    const rec = (recBase||[]).find(r=>r.id===item.recetaId);
-    if (!rec) return 50;
-    const ms = (rec.ingredientes||[]).map(ri=>(ingBase||[]).find(i=>i.id===ri.ingId)?.margen||0).filter(m=>m>0);
-    return ms.length ? Math.round(ms.reduce((a,b)=>a+b,0)/ms.length) : 50;
-  },[item.recetaId]);
-
-  // Tipo de la receta para generar opciones automáticas
-  const rec = (recBase||[]).find(r=>r.id===item.recetaId);
-  const tipo = getTipo(rec?.tipo||'delicia');
-  const rindeNum = rec?.rinde_num || tipo.porcionesDefault;
-
-  const calcPrecio = (unidades, margen) =>
-    (unidades && costoReceta) ? Math.round((costoReceta/unidades)*(1+margen/100)) : 0;
-
-  // Generar opciones automáticas según tipo — SIEMPRE desde la receta
-  // (ignora opciones guardadas si existen, para forzar recálculo correcto)
-  const opcionesDefault = React.useMemo(() => {
-    if (tipo.modo==='porcionable') {
-      // Torta/Tarta: Entera + Por porción
-      return [
-        {
-          id:'o1', label:'Entera',
-          unidades:1, margen:margenSug,
-          precio: calcPrecio(1, margenSug),
-          deduccion: rindeNum, // vender 1 entera descuenta rindeNum porciones
-          precioManual:false
-        },
-        {
-          id:'o2', label:'Por porción ('+rindeNum+' c/torta)',
-          unidades:rindeNum, margen:margenSug,
-          precio: calcPrecio(rindeNum, margenSug),
-          deduccion: 1, // vender 1 porción descuenta 1 unidad
-          precioManual:false
-        },
-      ];
-    }
-    // Individual: Por docena (batch completo) + Por unidad (1 pieza)
-    const labelDocena = rindeNum===12 ? 'Por docena ('+rindeNum+' u.)' : 'Por lote ('+rindeNum+' u.)';
-    return [
-      {
-        id:'o1', label: labelDocena,
-        unidades:1, margen:margenSug,
-        precio: calcPrecio(1, margenSug),
-        deduccion: rindeNum, // vender 1 docena descuenta rindeNum unidades
-        precioManual:false
-      },
-      {
-        id:'o2', label:'Por unidad (1 pieza)',
-        unidades:rindeNum, margen:margenSug,
-        precio: calcPrecio(rindeNum, margenSug),
-        deduccion: 1, // vender 1 pieza descuenta 1 unidad
-        precioManual:false
-      },
-    ];
-  },[tipo.id, rindeNum, margenSug, costoReceta]);
-
-  // Combinar estructura de opcionesDefault con precios guardados previamente
-  const opcionesIniciales = React.useMemo(() => {
-    const saved = item.opciones || [];
-    // Siempre partir de la estructura correcta según el tipo
-    // y solo rescatar los PRECIOS si el usuario los había editado
-    return opcionesDefault.map(op => {
-      // Buscar si había un precio guardado para esta opción (por label similar)
-      const guardada = saved.find(s => {
-        if (op.label === 'Entera') return s.label === 'Entera' || s.label?.includes('ntera');
-        if (op.label?.includes('porción')) return s.label?.includes('porción') || s.label?.includes('porcion');
-        if (op.label?.includes('docena') || op.label?.includes('lote')) return s.label?.includes('docena') || s.label?.includes('lote');
-        if (op.label?.includes('unidad') || op.label?.includes('pieza')) return s.label?.includes('unidad') || s.label?.includes('pieza');
-        return false;
-      });
-      // Si tenía precio manual guardado, conservarlo — sino usar el calculado
-      if (guardada && guardada.precioManual && Number(guardada.precio) > 0) {
-        return { ...op, precio: guardada.precio, precioManual: true };
-      }
-      return op; // usar precio calculado automáticamente
-    });
-  },[]);
-
-  const [opciones, setOpciones] = useState(opcionesIniciales);
-
-  const editar = (id,k,v) => setOpciones(prev=>prev.map(o=>{
-    if(o.id!==id) return o;
-    const u = {...o,[k]:v};
-    if(k==='unidades'||k==='margen'){
-      u.precioRec = calcPrecio(Number(u.unidades)||1, Number(u.margen)||0);
-      if(!u.precioManual) u.precio = u.precioRec;
-    }
-    if(k==='precio') u.precioManual=true;
-    return u;
-  }));
-
-  const resetPrecio = (id) => setOpciones(prev=>prev.map(o=>{
-    if(o.id!==id) return o;
-    const p = calcPrecio(Number(o.unidades)||1,Number(o.margen)||0);
-    return {...o,precio:p,precioManual:false};
-  }));
-
-  const agregar = () => setOpciones(p=>[...p,{id:'o'+Date.now(),label:'',unidades:1,margen:margenSug,precio:calcPrecio(1,margenSug),precioManual:false}]);
-  const quitar  = (id) => setOpciones(p=>p.filter(o=>o.id!==id));
-
-  return (
-    <div style={{paddingBottom:80}}>
-      <Header titulo={`💰 ${item.recetaEmoji||'🍰'} ${item.recetaNombre}`} onBack={onCancelar} />
-      <div style={{padding:'16px'}}>
-
-        {/* Resumen de costo */}
-        <div style={{background:'var(--beige)',borderRadius:12,padding:'12px 14px',marginBottom:14}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
-            <span style={{fontSize:13,color:'var(--texto)'}}>Costo materia prima (1 batch)</span>
-            <span style={{fontSize:16,fontWeight:700,color:'var(--texto)'}}>${costoReceta.toLocaleString('es-AR')}</span>
-          </div>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2}}>
-            <span style={{fontSize:12,color:'var(--texto2)'}}>{tipo.label} · rinde {rindeNum} {tipo.modo==='porcionable'?'porciones':'unidades'}</span>
-            <span style={{fontSize:11,color:'var(--verde)',fontWeight:600}}>Margen: {margenSug}%</span>
-          </div>
-          <div style={{fontSize:11,color:'var(--texto)',fontWeight:600,marginTop:2}}>
-            {tipo.modo==='porcionable'
-              ? `Entera: $${calcPrecio(1,margenSug).toLocaleString('es-AR')} · Porción: $${calcPrecio(rindeNum,margenSug).toLocaleString('es-AR')}`
-              : `Por lote: $${calcPrecio(1,margenSug).toLocaleString('es-AR')} · Por unidad: $${calcPrecio(rindeNum,margenSug).toLocaleString('es-AR')}`
-            }
-          </div>
-          {costoReceta===0&&<p style={{fontSize:11,color:'var(--naranja)',marginTop:4}}>⚠️ Sin costo — cargá los precios en Stock</p>}
-        </div>
-
-        <p style={{fontSize:12,color:'var(--texto2)',marginBottom:12}}>
-          Precios calculados automáticamente. Podés ajustarlos si querés.
-        </p>
-
-        {opciones.map(op=>{
-          const recP = calcPrecio(Number(op.unidades)||1,Number(op.margen)||0);
-          return(
-            <div key={op.id} style={{background:'var(--superficie)',border:'1px solid var(--beige)',borderRadius:12,padding:'12px 14px',marginBottom:10}}>
-              <div style={{display:'flex',gap:8,marginBottom:10,alignItems:'center'}}>
-                <input value={op.label} onChange={e=>editar(op.id,'label',e.target.value)}
-                  placeholder="Ej: Por porción / Entera" style={{flex:1,...S.inp}}/>
-                {opciones.length>1&&<button onClick={()=>quitar(op.id)} style={{color:'var(--rojo)',background:'none',border:'none',cursor:'pointer',fontSize:18}}>✕</button>}
-              </div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
-                <div>
-                  <p style={{fontSize:11,color:'var(--texto2)',marginBottom:4}}>{tipo.modo==='porcionable'?'Porciones/unidades':'Unidades que salen'}</p>
-                  <input type="number" value={op.unidades||''} onChange={e=>editar(op.id,'unidades',Number(e.target.value))}
-                    style={{...S.inp,width:'100%'}} placeholder={String(rindeNum)}/>
-                </div>
-                <div>
-                  <p style={{fontSize:11,color:'var(--texto2)',marginBottom:4}}>Margen (%)</p>
-                  <input type="number" value={op.margen||''} onChange={e=>editar(op.id,'margen',Number(e.target.value))}
-                    style={{...S.inp,width:'100%'}} placeholder={String(margenSug)}/>
-                </div>
-              </div>
-              <div style={{display:'flex',gap:8,alignItems:'flex-end'}}>
-                <div style={{flex:1}}>
-                  <p style={{fontSize:11,color:op.precioManual?'var(--naranja)':'var(--verde)',marginBottom:4,fontWeight:600}}>
-                    {op.precioManual?'✏️ Editado — recomendado $'+recP.toLocaleString('es-AR'):'✅ Precio recomendado'}
-                  </p>
-                  <div style={{display:'flex',alignItems:'center',border:'2px solid var(--caramelo)',borderRadius:10,overflow:'hidden'}}>
-                    <span style={{padding:'0 10px',color:'var(--texto2)',fontSize:14}}>$</span>
-                    <input type="number" value={op.precio||''} onChange={e=>editar(op.id,'precio',Number(e.target.value))}
-                      style={{border:'none',outline:'none',padding:'10px 6px 10px 0',width:'100%',background:'var(--superficie)',color:'var(--texto)',fontSize:16,fontWeight:700}}/>
-                  </div>
-                </div>
-                {op.precioManual&&(
-                  <button onClick={()=>resetPrecio(op.id)}
-                    style={{padding:'10px 12px',borderRadius:10,border:'1px solid var(--beige2)',background:'none',color:'var(--caramelo)',cursor:'pointer',fontSize:12,whiteSpace:'nowrap',marginBottom:1}}>
-                    ↺ Auto
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-
-        <button onClick={agregar} style={{...S.btn,width:'100%',marginBottom:12}}>+ Otra opción de venta</button>
-        <button onClick={()=>onGuardar(opciones)} disabled={!opciones.some(o=>Number(o.precio)>0)}
-          style={{...S.btnPrimario,width:'100%',opacity:opciones.some(o=>Number(o.precio)>0)?1:0.5}}>
-          ✓ Confirmar precios
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════
-// PANTALLA: PRODUCTOS (venta diaria — viene de la planificación)
-// ══════════════════════════════════════════════════════════════════════
-function PantallaProductos({ uid, ingBase, recBase }) {
-  const hoy = () => new Date().toISOString().slice(0,10);
-  const [planItems, setPlanItems] = useState(null);
-  const [carrito,   setCarrito]   = useState([]);
-  const [pago,      setPago]      = useState('efectivo');
-  const [entrega,   setEntrega]   = useState('retira');
-  const [confirmado,setConfirmado]= useState(false);
-  // Datos del cliente
-  const [clienteNombre, setClienteNombre] = useState('');
-  const [clienteTel,    setClienteTel]    = useState('');
-  const [clienteDir,    setClienteDir]    = useState('');
-  const [clienteHora,   setClienteHora]   = useState('');
-  const [clienteNota,   setClienteNota]   = useState('');
-
-  useEffect(() => {
-    return db.collection(`reposteria/${uid}/planificacion`).doc(hoy())
-      .onSnapshot(snap => setPlanItems(snap.exists ? (snap.data().items||[]) : []));
-  }, [uid]);
-
-  const CONV_P = { kg:1000, litro:1000, docena:12, unidad:1 };
-
-  // Calcular costo de 1 batch de una receta
-  const calcCostoRec = (recetaId) => {
-    const rec = (recBase||[]).find(r=>r.id===recetaId);
-    if (!rec) return 0;
-    return Math.round((rec.ingredientes||[]).reduce((s,ri)=>{
-      const ing = (ingBase||[]).find(i=>i.id===ri.ingId);
-      if (!ing||!ing.precio) return s;
-      return s + (ri.cantidad/(CONV_P[ing.unidad]||1)) * ing.precio;
-    },0));
-  };
-
-  // Normaliza las opciones de un item: siempre genera 2 opciones correctas
-  const normalizarOpciones = (item) => {
-    const rec = (recBase||[]).find(r=>r.id===item.recetaId);
-    const tipo = getTipo(rec?.tipo||'delicia');
-    const rindeNum = rec?.rinde_num || item.rindeNum || tipo.porcionesDefault;
-    const costo = calcCostoRec(item.recetaId);
-    const margenSug = 50; // margen por defecto si no hay datos
-
-    const saved = item.opciones || [];
-    const tieneDocena = saved.some(o=>o.label?.includes('docena')||o.label?.includes('lote'));
-    const tienePorcion = saved.some(o=>o.label?.includes('porción'));
-    const tieneEntera = saved.some(o=>o.label==='Entera');
-
-    // Si tiene las 2 opciones correctas → devolver tal cual
-    if (tipo.modo==='porcionable' && tieneEntera && tienePorcion) return saved;
-    if (tipo.modo==='individual' && tieneDocena) return saved;
-
-    // Regenerar opciones correctas con precio calculado
-    const calcP = (u) => costo>0 ? Math.round((costo/u)*(1+margenSug/100)) : 0;
-
-    if (tipo.modo==='porcionable') {
-      const precioEntera = saved[0]?.precio || calcP(1);
-      const precioPorc   = Math.round(precioEntera/rindeNum);
-      return [
-        { id:'o1', label:'Entera', precio:precioEntera, deduccion:rindeNum, unidades:1 },
-        { id:'o2', label:'Por porción ('+rindeNum+' c/u)', precio:precioPorc, deduccion:1, unidades:rindeNum },
-      ];
-    }
-    // Individual: si tenía precio guardado como "Por unidad" (batch completo), dividir
-    const precioGuardado = saved[0]?.precio || 0;
-    const esPreBatch = precioGuardado > 0 && rindeNum > 1 && !tieneDocena;
-    const precioDocena = esPreBatch ? precioGuardado : (calcP(1) || precioGuardado * rindeNum);
-    const precioUnidad = esPreBatch ? Math.round(precioGuardado/rindeNum) : Math.round(precioDocena/rindeNum);
-    return [
-      { id:'o1', label:'Por docena ('+rindeNum+' u.)', precio:precioDocena, deduccion:rindeNum, unidades:1 },
-      { id:'o2', label:'Por unidad (1 pieza)', precio:precioUnidad, deduccion:1, unidades:rindeNum },
-    ];
-  };
-
-  const productosDelDia = (planItems||[])
-    .filter(i => i.opciones && i.opciones.some(o=>Number(o.precio)>0))
-    .map(i => ({...i, opciones: normalizarOpciones(i)}));
-
-  // Disponible real = disponible en Firebase − lo que está en el carrito aún no confirmado
-  const getDisponible = (recetaId) => {
-    const item = (planItems||[]).find(i=>i.recetaId===recetaId);
-    if (!item) return 0;
-    const base = item.disponible ?? 0;
-    // Restar lo que ya está en el carrito
-    // Ahora el carrito siempre trabaja en unidades individuales (deduccion=1 por defecto)
-    const enCarrito = carrito.filter(c=>c.recetaId===recetaId)
-      .reduce((s,c)=>s+(c.deduccion||1)*c.cantidad,0);
-    return Math.max(0, base - enCarrito);
-  };
-
-  const agregar = (item, op) => {
-    const disp      = getDisponible(item.recetaId);
-    const deduccion = op.deduccion || 1;            // cuántas unidades representa esta opción
-    const precioUnit= Math.round(op.precio / deduccion); // precio por 1 unidad individual
-    if (disp < deduccion) return;                   // no hay suficiente stock
-
-    // El carrito SIEMPRE trabaja en unidades individuales
-    // "Por docena" agrega 12 unidades de una vez al precio unitario
-    const key = item.recetaId + '_unidad_' + op.id; // misma key para unificar
-    setCarrito(prev => {
-      const e = prev.find(i=>i.key===key);
-      if (e) {
-        // Agregar deduccion unidades más
-        return prev.map(i=>i.key===key?{...i,cantidad:i.cantidad+deduccion}:i);
-      }
-      return [...prev, {
-        key, recetaId:item.recetaId,
-        emoji:item.recetaEmoji, nombre:item.recetaNombre,
-        opLabel: deduccion>1 ? op.label : 'Por unidad',
-        precio: precioUnit,   // precio de 1 unidad
-        deduccion: 1,         // cada unidad en carrito = 1 del stock
-        cantidad: deduccion,  // empezamos con tantas unidades como indica la opción
-      }];
-    });
-  };
-
-  const cambiar = (key, delta) => {
-    setCarrito(prev => {
-      if (delta > 0) {
-        const item = prev.find(i=>i.key===key);
-        if (item) {
-          const disp = getDisponible(item.recetaId);
-          if (disp < 1) return prev; // no hay stock para 1 unidad más
-        }
-      }
-      return prev.map(i=>i.key===key?{...i,cantidad:Math.max(0,i.cantidad+delta)}:i).filter(i=>i.cantidad>0);
-    });
-  };
-
-  const total = carrito.reduce((s,i)=>s+i.precio*i.cantidad, 0);
-
-  const liquidarSobrantes = async () => {
-    const itemsConSobrante = (planItems||[]).filter(i=>(i.disponible||0)>0);
-    if (!itemsConSobrante.length) { alert('No hay sobrantes para liquidar.'); return; }
-
-    let perdidaTotal = 0;
-    const detalle = itemsConSobrante.map(item => {
-      const costoUnitario = item.opciones && item.opciones[0] && item.opciones[0].precio
-        ? item.opciones[0].precio / (1 + (item.opciones[0].margen||50)/100)
-        : 0;
-      const perdida = Math.round(costoUnitario * (item.disponible||0));
-      perdidaTotal += perdida;
-      return (item.recetaEmoji||'🍰') + ' ' + item.recetaNombre + ': ' + item.disponible + ' u. → $' + perdida.toLocaleString('es-AR');
-    });
-
-    const msg = 'Sobrantes del día:\n\n' + detalle.join('\n') + '\n\nPérdida total: $' + perdidaTotal.toLocaleString('es-AR') + '\n\n¿Confirmar y cerrar la producción de hoy?';
-    if (!confirm(msg)) return;
-
-    await db.collection('reposteria/' + uid + '/pedidos').add({
-      fecha: hoy(),
-      tipo: 'perdida',
-      hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
-      items: itemsConSobrante.map(i=>({ nombre: (i.recetaEmoji||'') + ' ' + i.recetaNombre, cantidad: i.disponible, subtotal: 0 })),
-      total: -perdidaTotal,
-      perdida: perdidaTotal,
-      confirmado: true,
-    });
-
-    const snap = await db.collection('reposteria/' + uid + '/planificacion').doc(hoy()).get();
-    if (snap.exists) {
-      const items = snap.data().items.map(i=>({...i, disponible:0, cerrado:true}));
-      await db.collection('reposteria/' + uid + '/planificacion').doc(hoy()).update({ items, cerrado:true });
-    }
-    alert('Producción del día cerrada. Pérdida registrada en el Resumen.');
-    // ── Enviar resumen por email ──
-    if(window.enviarResumenDiario_repos_licencia){
-      const ventasHoy = await db.collection('reposteria/' + uid + '/pedidos')
-        .where('fecha','==',hoy()).get()
-        .then(s=>s.docs.map(d=>d.data())).catch(()=>[]);
-      const totalV = ventasHoy.reduce((a,p)=>a+(p.total||0),0);
-      const totalCosto = itemsConSobrante.reduce((a,i)=>{
-        const c=i.opciones&&i.opciones[0]?i.opciones[0].precio/(1+(i.opciones[0].margen||50)/100):0;
-        return a+Math.round(c*(i.disponible||0));
-      },0);
-      const detDet = itemsConSobrante.map(i=>({
-        label:(i.recetaEmoji||'🍰')+' '+i.nombre+' (sobrante)',
-        monto:-Math.round((i.opciones&&i.opciones[0]?i.opciones[0].precio/(1+(i.opciones[0].margen||50)/100):0)*(i.disponible||0)),
-        color:'#e05c5c'
-      }));
-      window.enviarResumenDiario_repos_licencia({
-        fecha: new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long',year:'numeric'}),
-        totalIngresos: totalV,
-        ganancia: totalV - totalCosto,
-        detalle: [
-          {label:'💰 Ventas del día',monto:totalV,color:'#d946ef'},
-          {label:'📦 Pérdida por sobrantes',monto:-perdidaTotal,color:'#e05c5c'},
-          ...detDet
-        ]
-      }).catch(()=>{});
-    }
-  };
-
-  const confirmar = async () => {
-    if (!carrito.length) return;
-    const horaVenta = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-    // Guardar pedido
-    await db.collection(`reposteria/${uid}/pedidos`).add({
-      fecha: hoy(),
-      hora: horaVenta,
-      tipo: 'mostrador',
-      items: carrito.map(i=>({ nombre:`${i.emoji} ${i.nombre}`, opcion:i.opLabel, precio:i.precio, cantidad:i.cantidad, subtotal:i.precio*i.cantidad })),
-      total, pago, entrega,
-      confirmado: pago !== 'transferencia',
-      cliente: {
-        nombre:  clienteNombre.trim(),
-        tel:     clienteTel.trim(),
-        dir:     clienteDir.trim(),
-        hora:    clienteHora.trim(),
-        nota:    clienteNota.trim(),
-      },
-    });
-    // ── La venta entra sola a la Caja con su forma de pago ──
-    await db.collection(`reposteria/${uid}/caja`).add({
-      tipo: 'ingreso',
-      categoria: 'venta',
-      concepto: 'Venta mostrador' + (clienteNombre.trim() ? ' — ' + clienteNombre.trim() : ''),
-      monto: total,
-      formaPago: pago,
-      fecha: hoy(),
-      hora: horaVenta,
-      origen: 'mostrador',
-      createdAt: new Date(),
-    });
-    // Limpiar datos del cliente
-    setClienteNombre(''); setClienteTel(''); setClienteDir(''); setClienteHora(''); setClienteNota('');
-    // Descontar disponible en planificación
-    const snap = await db.collection(`reposteria/${uid}/planificacion`).doc(hoy()).get();
-    if (snap.exists) {
-      const items = snap.data().items || [];
-      const actualizados = items.map(item => {
-        const vendido = carrito.filter(c=>c.recetaId===item.recetaId)
-          .reduce((s,c)=>s+c.deduccion*c.cantidad,0);
-        if (!vendido) return item;
-        return {...item, disponible: Math.max(0,(item.disponible||0)-vendido)};
-      });
-      await db.collection(`reposteria/${uid}/planificacion`).doc(hoy()).update({ items: actualizados });
-    }
-    setCarrito([]);
-    setConfirmado(true);
-    setTimeout(()=>setConfirmado(false), 3000);
-  };
-
-  const PAGOS    = [['efectivo','💵 Efectivo'],['transferencia','📱 Transfer.'],['debito','💳 Débito'],['credito','💳 Crédito']];
-  const ENTREGAS = [['retira','🏪 Retira'],['envio','🛵 Envío']];
-
-  if (planItems === null) return <div style={{textAlign:'center',padding:40,color:'var(--texto2)'}}>Cargando...</div>;
-
-  if (planItems.length === 0) return (
-    <div style={{paddingBottom:80}}>
-      <div style={{textAlign:'center',padding:'60px 24px'}}>
-        <div style={{fontSize:48,marginBottom:12}}>📐</div>
-        <p style={{fontWeight:600,color:'var(--texto)',marginBottom:8}}>No hay planificación para hoy</p>
-        <p style={{color:'var(--texto2)',fontSize:14}}>Andá a Planificación, cargá lo que vas a producir hoy y guardá. Los productos aparecerán acá.</p>
-      </div>
-    </div>
-  );
-
-  if (productosDelDia.length === 0) return (
-    <div style={{paddingBottom:80}}>
-      <div style={{textAlign:'center',padding:'40px 24px'}}>
-        <div style={{fontSize:48,marginBottom:12}}>💰</div>
-        <p style={{fontWeight:600,color:'var(--texto)',marginBottom:8}}>Falta definir los precios</p>
-        <p style={{color:'var(--texto2)',fontSize:14,marginBottom:20}}>En Planificación tocá el botón 💰 de cada producto para cargar los precios de venta.</p>
-        <button onClick={liquidarSobrantes}
-          style={{padding:'10px 20px',borderRadius:10,background:'rgba(192,57,43,0.08)',color:'var(--rojo)',border:'1px solid rgba(192,57,43,0.25)',fontSize:13,fontWeight:600,cursor:'pointer'}}>
-          ⚠️ Cerrar producción y liquidar sobrantes
-        </button>
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{paddingBottom:80}}>
-      {(planItems||[]).some(i=>(i.disponible||0)>0) && (
-        <div style={{margin:'8px 16px 0'}}>
-          <button onClick={liquidarSobrantes}
-            style={{width:'100%',padding:'9px',borderRadius:10,background:'rgba(192,57,43,0.08)',color:'var(--rojo)',border:'1px solid rgba(192,57,43,0.25)',fontSize:13,fontWeight:600,cursor:'pointer'}}>
-            ⚠️ Cerrar producción y liquidar sobrantes
-          </button>
-        </div>
-      )}
-      <div style={{display:'flex',flexDirection:'column',gap:0}}>
-
-        {/* Lista productos */}
-        <div style={{padding:'12px 16px',display:'flex',flexDirection:'column',gap:10}}>
-          {productosDelDia.map(item => (
-            <div key={item.recetaId} className="card-base" style={{padding:'10px 12px',marginBottom:0}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
-                <div style={{fontWeight:600,fontSize:15,color:'var(--texto)'}}>{item.recetaEmoji} {item.recetaNombre}</div>
-                <div style={{flexShrink:0,marginLeft:8}}>
-                  {(()=>{
-                    const disp=getDisponible(item.recetaId);
-                    const esPorcionable=item.opciones?.some(o=>o.label?.includes('porción')||o.label==='Entera');
-                    const unidLabel=esPorcionable?'porc.':'u.';
-                    return <span style={{fontSize:12,fontWeight:700,color:disp===0?'var(--rojo)':disp<=(item.rindeNum||1)?'var(--naranja)':'var(--verde)'}}>
-                      {disp===0?'⛔ Agotado':disp+' '+unidLabel+' disp.'}
-                    </span>;
-                  })()}
-                </div>
-              </div>
-              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                {item.opciones.filter(o=>Number(o.precio)>0).map(op => {
-                  const deduccion=op.deduccion||1;
-                  const disp=getDisponible(item.recetaId);
-                  const sinStock=disp<deduccion;
-                  return (
-                    <div key={op.id} style={{flex:'1 1 130px',background:sinStock?'rgba(192,57,43,0.05)':'var(--crema)',border:`1px solid ${sinStock?'rgba(192,57,43,0.2)':'var(--beige)'}`,borderRadius:10,padding:'8px 10px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                      <div>
-                        <div style={{fontSize:11,color:'var(--texto2)'}}>{op.label}</div>
-                        <div style={{fontSize:14,fontWeight:700,color:sinStock?'var(--rojo)':'var(--chocolate)'}}>${op.precio.toLocaleString('es-AR')}</div>
-                      </div>
-                      <button onClick={()=>agregar(item,op)} disabled={sinStock}
-                        style={{width:30,height:30,borderRadius:'50%',background:sinStock?'var(--beige)':'var(--caramelo)',color:sinStock?'var(--texto2)':'white',border:'none',fontSize:20,cursor:sinStock?'not-allowed':'pointer',lineHeight:1,display:'flex',alignItems:'center',justifyContent:'center',opacity:sinStock?0.5:1}}>+</button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Carrito */}
-        <div style={{margin:'0 16px 16px',background:'var(--superficie)',border:'1px solid var(--beige)',borderRadius:14,padding:14}}>
-          <p style={{fontSize:12,fontWeight:700,color:'var(--texto2)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:10}}>🛒 Carrito</p>
-
-          {carrito.length===0
-            ? <p style={{color:'var(--texto2)',fontSize:13,textAlign:'center',padding:'8px 0'}}>Agregá productos para armar la venta</p>
-            : <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:12}}>
-                {carrito.map(i=>(
-                  <div key={i.key} style={{display:'flex',alignItems:'center',justifyContent:'space-between',background:'var(--crema)',borderRadius:8,padding:'7px 10px'}}>
-                    <div style={{minWidth:0,flex:1}}>
-                      <div style={{fontSize:13,fontWeight:500,color:'var(--texto)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{i.emoji} {i.nombre}</div>
-                      <div style={{fontSize:11,color:'var(--texto2)'}}>${i.precio.toLocaleString('es-AR')} por unidad</div>
-                    </div>
-                    <div style={{display:'flex',alignItems:'center',gap:5,flexShrink:0}}>
-                      <button onClick={()=>cambiar(i.key,-1)} style={{width:22,height:22,borderRadius:'50%',border:'1px solid var(--beige2)',background:'none',cursor:'pointer',color:'var(--texto)',fontSize:14}}>-</button>
-                      <span style={{fontSize:14,fontWeight:700,color:'var(--texto)',minWidth:20,textAlign:'center'}}>{i.cantidad}</span>
-                      <button onClick={()=>cambiar(i.key,+1)} style={{width:22,height:22,borderRadius:'50%',border:'1px solid var(--beige2)',background:'none',cursor:'pointer',color:'var(--texto)',fontSize:14}}>+</button>
-                      <span style={{fontSize:13,fontWeight:600,color:'var(--texto)',minWidth:56,textAlign:'right'}}>${(i.precio*i.cantidad).toLocaleString('es-AR')}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-          }
-
-          {/* Pago */}
-          <p style={{fontSize:11,fontWeight:700,color:'var(--texto2)',textTransform:'uppercase',marginBottom:6}}>Forma de pago</p>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginBottom:10}}>
-            {PAGOS.map(([k,l])=>(
-              <button key={k} onClick={()=>setPago(k)} style={{padding:'7px 4px',borderRadius:8,fontSize:12,fontWeight:pago===k?700:400,border:pago===k?'2px solid var(--caramelo)':'1px solid var(--beige)',background:pago===k?'var(--beige)':'none',color:'var(--texto)',cursor:'pointer'}}>{l}</button>
-            ))}
-          </div>
-
-          {/* Entrega */}
-          <p style={{fontSize:11,fontWeight:700,color:'var(--texto2)',textTransform:'uppercase',marginBottom:6}}>Entrega</p>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginBottom:10}}>
-            {ENTREGAS.map(([k,l])=>(
-              <button key={k} onClick={()=>setEntrega(k)} style={{padding:'7px 4px',borderRadius:8,fontSize:12,fontWeight:entrega===k?700:400,border:entrega===k?'2px solid var(--caramelo)':'1px solid var(--beige)',background:entrega===k?'var(--beige)':'none',color:'var(--texto)',cursor:'pointer'}}>{l}</button>
-            ))}
-          </div>
-
-          {/* Datos del cliente — aparecen según pago/entrega */}
-          {(entrega==='envio' || pago==='transferencia' || pago==='debito' || pago==='credito') && (
-            <div style={{background:'var(--beige)',borderRadius:10,padding:'10px 12px',marginBottom:10}}>
-              <p style={{fontSize:11,fontWeight:700,color:'var(--texto2)',textTransform:'uppercase',marginBottom:8}}>
-                {entrega==='envio' ? '🛵 Datos del envío' : '👤 Datos del cliente'}
-              </p>
-              <input value={clienteNombre} onChange={e=>setClienteNombre(e.target.value)}
-                placeholder="Nombre del cliente" style={{...S.inp,width:'100%',marginBottom:6,fontSize:13}}/>
-              <input value={clienteTel} onChange={e=>setClienteTel(e.target.value)}
-                placeholder="Teléfono / WhatsApp" style={{...S.inp,width:'100%',marginBottom:6,fontSize:13}}
-                type="tel"/>
-              {entrega==='envio' && <>
-                <input value={clienteDir} onChange={e=>setClienteDir(e.target.value)}
-                  placeholder="Dirección de entrega" style={{...S.inp,width:'100%',marginBottom:6,fontSize:13}}/>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:6}}>
-                  <input value={clienteHora} onChange={e=>setClienteHora(e.target.value)}
-                    placeholder="Hora de entrega" style={{...S.inp,fontSize:13}} type="time"/>
-                  <input value={clienteNota} onChange={e=>setClienteNota(e.target.value)}
-                    placeholder="Nota / referencia" style={{...S.inp,fontSize:13}}/>
-                </div>
-              </>}
-              {pago==='transferencia' && (
-                <div style={{fontSize:11,color:'var(--naranja)',marginTop:2,fontWeight:600}}>
-                  ⏳ Recordá confirmar la transferencia en el Resumen cuando llegue
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Total */}
-          <div style={{borderTop:'1px solid var(--beige)',paddingTop:10}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-              <span style={{fontSize:15,fontWeight:700,color:'var(--texto)'}}>Total</span>
-              <span style={{fontSize:20,fontWeight:700,color:'var(--texto)'}}>${total.toLocaleString('es-AR')}</span>
-            </div>
-            {confirmado && <div style={{background:'#d4edda',color:'#155724',borderRadius:8,padding:'8px',textAlign:'center',fontSize:13,marginBottom:8}}>✅ Venta confirmada</div>}
-            <button onClick={confirmar} disabled={!carrito.length} style={{...S.btnPrimario,width:'100%',opacity:carrito.length?1:0.5}}>✓ Confirmar venta</button>
-
-          </div>
-        </div>
-
-      </div>
-    </div>
-  );
-}
-
-
-// ══════════════════════════════════════════════════════════════════════
-// PANTALLA: RESUMEN FINANCIERO
-// Ventas · Costos · Ganancias · Formas de pago · Por producto
-// ══════════════════════════════════════════════════════════════════════
 function PantallaResumen({ uid, ingBase, recBase }) {
   const [periodo, setPeriodo] = useState('hoy');
   const [pedidos, setPedidos] = useState([]);
@@ -3592,14 +2729,129 @@ function HubPedidos({ uid, ingBase, recBase }) {
 }
 
 // Sección DÍA → une Planificación (Planificar) + Productos del día (Vender)
-function PantallaDia({ uid, ingBase, recBase }) {
-  const [paso, setPaso] = useState('planificar');
+function PantallaDia({ uid }) {
+  const hoy = () => new Date().toISOString().slice(0,10);
+
+  // Recetas disponibles (para agregar productos rápido)
+  const loadRec = () => { try { return JSON.parse(localStorage.getItem('dg_rc_rec')) || REC_DEFAULT_RC; } catch { return REC_DEFAULT_RC; } };
+  const [recetas, setRecetas] = useState(loadRec);
+  useEffect(() => {
+    if (!uid) return;
+    db.collection(`reposteria/${uid}/recetas`).doc('recetario').get()
+      .then(s => { if (s.exists && s.data().data?.length) setRecetas(s.data().data); }).catch(()=>{});
+  }, [uid]);
+
+  // Productos del día (carga una vez; editás local y se guarda al salir del campo)
+  const [items, setItems]       = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [sel, setSel]           = useState('');
+  const [pago, setPago]         = useState('efectivo');
+
+  useEffect(() => {
+    if (!uid) return;
+    db.collection(`reposteria/${uid}/planificacion`).doc(hoy()).get()
+      .then(s => {
+        const raw = s.exists ? (s.data().items || []) : [];
+        setItems(raw.map(it => ({
+          recetaId: it.recetaId,
+          nombre:   it.nombre || it.recetaNombre || 'Producto',
+          emoji:    it.emoji  || it.recetaEmoji  || '🍰',
+          precio:   Number(it.precio) || 0,
+          cantidad: Number(it.cantidad) || 0,   // hechos hoy (lo usa el Resumen para el costo)
+          vendidos: Number(it.vendidos) || 0,
+        })));
+        setCargando(false);
+      })
+      .catch(()=>setCargando(false));
+  }, [uid]);
+
+  const persistir = (arr) => { db.collection(`reposteria/${uid}/planificacion`).doc(hoy()).set({ items: arr }).catch(()=>{}); };
+
+  const agregarProducto = () => {
+    const r = recetas.find(x => x.id === sel);
+    if (!r) return;
+    if (items.some(i => i.recetaId === r.id)) { setSel(''); return; }
+    const nuevos = [...items, { recetaId:r.id, nombre:r.nombre, emoji:r.emoji||'🍰', precio:Number(r.precioVenta)||0, cantidad:0, vendidos:0 }];
+    setItems(nuevos); persistir(nuevos); setSel('');
+  };
+  const setCampoLocal = (id, campo, val) => setItems(prev => prev.map(i => i.recetaId===id ? {...i, [campo]:val} : i));
+  const quitar = (id) => { const n = items.filter(i => i.recetaId!==id); setItems(n); persistir(n); };
+
+  const vender = async (item) => {
+    const hora = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+    await db.collection(`reposteria/${uid}/caja`).add({
+      tipo:'ingreso', categoria:'venta',
+      concepto:'Venta del día — ' + item.nombre,
+      monto: item.precio, formaPago: pago,
+      fecha: hoy(), hora, origen:'mostrador', createdAt: new Date(),
+    });
+    const n = items.map(i => i.recetaId===item.recetaId ? {...i, vendidos:i.vendidos+1} : i);
+    setItems(n); persistir(n);
+  };
+
+  const totalDia = items.reduce((s,i)=> s + i.precio*i.vendidos, 0);
+  const inp = { width:'100%', padding:'8px 10px', borderRadius:8, border:'1px solid var(--beige)', background:'var(--crema)', color:'var(--texto)', fontSize:14 };
+
   return (
-    <div>
-      <HubToggle opciones={[['planificar', '📐 Planificar'], ['vender', '🧁 Vender']]} activo={paso} onChange={setPaso} />
-      {paso === 'planificar'
-        ? <PantallaPlanificacion uid={uid} ingBase={ingBase} recBase={recBase} />
-        : <PantallaProductos uid={uid} ingBase={ingBase} recBase={recBase} />}
+    <div style={{ padding:'12px 16px 110px' }}>
+      {/* Agregar producto del día */}
+      <div style={{ background:'var(--dorado)', borderRadius:12, padding:'12px 14px', marginBottom:14 }}>
+        <p style={{ fontSize:12, fontWeight:700, color:'var(--barTxt)', textTransform:'uppercase', marginBottom:8 }}>➕ Producto del día</p>
+        <div style={{ display:'flex', gap:8 }}>
+          <select value={sel} onChange={e=>setSel(e.target.value)} style={{ flex:1, padding:'11px 12px', borderRadius:10, border:'1.5px solid var(--caramelo)', background:'var(--superficie)', color:'var(--texto)', fontSize:14 }}>
+            <option value="">Elegí una receta…</option>
+            {recetas.map(r => <option key={r.id} value={r.id}>{(r.emoji||'🍰')+' '+r.nombre}</option>)}
+          </select>
+          <button onClick={agregarProducto} disabled={!sel} style={{ ...S.btnPrimario, padding:'11px 16px', opacity: sel?1:0.5 }}>Agregar</button>
+        </div>
+      </div>
+
+      {/* Total del día + forma de pago */}
+      <div style={{ background:'var(--chocolate)', color:'var(--barTxt)', borderRadius:12, padding:'12px 16px', marginBottom:14 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+          <span style={{ fontSize:13, opacity:.8 }}>Vendido hoy</span>
+          <span style={{ fontFamily:'Playfair Display', fontSize:24, fontWeight:700 }}>{rcPeso(totalDia)}</span>
+        </div>
+        <div style={{ display:'flex', gap:6 }}>
+          {[['efectivo','💵 Efectivo'],['transferencia','🏦 Transfer.']].map(([k,l]) => (
+            <button key={k} onClick={()=>setPago(k)} style={{ flex:1, padding:'7px', borderRadius:8, border:'1px solid rgba(255,255,255,0.25)', cursor:'pointer', fontSize:12, fontWeight:700, background: pago===k?'var(--caramelo)':'transparent', color:'var(--barTxt)' }}>{l}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Lista de productos */}
+      {cargando ? <p style={{ textAlign:'center', color:'var(--texto2)', padding:30 }}>Cargando…</p>
+       : items.length===0 ? (
+        <div style={{ textAlign:'center', padding:'40px 20px', color:'var(--texto2)' }}>
+          <div style={{ fontSize:40, marginBottom:8 }}>🧁</div>
+          <p style={{ fontWeight:600 }}>Sin productos para hoy</p>
+          <p style={{ fontSize:13 }}>Elegí una receta arriba y agregala.</p>
+        </div>
+       ) : items.map(item => {
+        const quedan = Math.max(0, item.cantidad - item.vendidos);
+        return (
+          <div key={item.recetaId} style={{ background:'var(--superficie)', border:'1px solid var(--beige)', borderRadius:14, padding:14, marginBottom:10 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+              <div>
+                <div style={{ fontWeight:700, fontSize:15, color:'var(--texto)' }}>{item.emoji} {item.nombre}</div>
+                <div style={{ fontSize:12, color:'var(--texto2)', marginTop:2 }}>Vendidos: <b>{item.vendidos}</b> · Quedan: <b>{quedan}</b></div>
+              </div>
+              <button onClick={()=>quitar(item.recetaId)} style={{ background:'none', border:'none', color:'var(--texto2)', cursor:'pointer', fontSize:18, lineHeight:1 }}>✕</button>
+            </div>
+            <div style={{ display:'flex', gap:8, marginTop:10, alignItems:'flex-end' }}>
+              <div style={{ flex:1 }}>
+                <label style={{ fontSize:10, color:'var(--texto2)', display:'block', marginBottom:3 }}>Hechos hoy</label>
+                <input type="number" value={item.cantidad} onChange={e=>setCampoLocal(item.recetaId,'cantidad',Math.max(0,Number(e.target.value)||0))} onBlur={()=>persistir(items)} style={inp} />
+              </div>
+              <div style={{ flex:1 }}>
+                <label style={{ fontSize:10, color:'var(--texto2)', display:'block', marginBottom:3 }}>Precio c/u</label>
+                <input type="number" value={item.precio} onChange={e=>setCampoLocal(item.recetaId,'precio',Math.max(0,Number(e.target.value)||0))} onBlur={()=>persistir(items)} style={inp} />
+              </div>
+              <button onClick={()=>vender(item)} style={{ ...S.btnPrimario, padding:'10px 14px', whiteSpace:'nowrap' }}>Vender 1</button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
