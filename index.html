@@ -136,6 +136,10 @@ var reposLicApp = firebase.apps.find(function(a){return a.name==="licencias";}) 
     appId:"1:761424199819:web:513eeaf0e54f4e1401d48e"
   },"licencias");
 window.dbLicencias = firebase.firestore(reposLicApp);
+window.dbLicenciasReady = new Promise(function(resolve){
+  firebase.auth(reposLicApp).onAuthStateChanged(function(u){ if(u) resolve(u.uid); });
+  firebase.auth(reposLicApp).signInAnonymously().catch(function(){ resolve(null); });
+});
 
 // ══════════════════════════════════════════════════════
 // HELPERS
@@ -737,10 +741,11 @@ function PantallaActivacionRepos({onActivado}) {
       if(lic.email&&lic.email.trim().toLowerCase()!==email.trim().toLowerCase()){setError("El email no coincide con el registrado. Contactá al administrador.");setCargando(false);return;}
       if(lic.celular&&lic.celular.trim()!==celular.trim()){setError("El celular no coincide con el registrado. Contactá al administrador.");setCargando(false);return;}
       if(String(lic.pin)!==pinIngresado.trim()){setError("El PIN no es correcto. Revisá el que te enviaron.");setCargando(false);return;}
+      const licUid = window.dbLicenciasReady ? await window.dbLicenciasReady : null;
       await window.dbLicencias.collection("licencias").doc(cod).update({
         estado:"usado", deviceId, celular:celular.trim(), email:email.trim(),
         negocio:negocio.trim(), aceptoTerminos:true, fechaAceptoTerminos:new Date().toISOString(),
-        activadoEn:new Date().toISOString()
+        activadoEn:new Date().toISOString(), activadoPorUid: licUid
       });
       const licObj = {codigo:cod, pin:lic.pin, email:email.trim(), celular:celular.trim(), negocio:negocio.trim(), deviceId, activado:true};
       localStorage.setItem("repos_licencia", JSON.stringify(licObj));
