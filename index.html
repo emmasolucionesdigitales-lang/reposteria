@@ -118,6 +118,12 @@ try{db.enablePersistence({synchronizeTabs:true}).catch(function(){});}catch(e){}
 const auth = firebase.auth();
 // Auth anónima para que las reglas de Firestore funcionen
 auth.signInAnonymously().catch(function(){});
+function esperarAuthListoRepos(){
+  return new Promise(function(resolve){
+    if(auth.currentUser){ resolve(auth.currentUser); return; }
+    const unsub=auth.onAuthStateChanged(function(u){ if(u){ unsub(); resolve(u); } });
+  });
+}
 
 // Licencias — app-control-de-apps
 var reposLicApp = firebase.apps.find(function(a){return a.name==="licencias";}) ||
@@ -2898,7 +2904,20 @@ function App() {
 
   if(fase==="activacion") return <PantallaActivacionRepos onActivado={pin=>{ setFase("pin"); }} />;
   const lic = getLicenciaRepos();
-  if(fase==="pin") return <PantallaPinRepos pin={lic?.pin} onOk={()=>setFase("app")} />;
+  // Vínculo de seguridad: este negocio (identificado por el dispositivo)
+  // queda atado a la sesión real de Firebase antes de dejar entrar a la
+  // app — se espera a que termine ANTES de mostrar cualquier pantalla,
+  // porque las pantallas ya arrancan a pedir datos apenas se montan.
+  const entrarAlApp = async () => {
+    try {
+      const licActual = getLicenciaRepos();
+      const deviceId = (licActual && licActual.deviceId) || "default";
+      const user = await esperarAuthListoRepos();
+      await db.collection("reposteria").doc(deviceId).set({ownerAuthUid:user.uid}, {merge:true});
+    } catch(e) { /* si falla, se reintenta la próxima vez que se abra la app */ }
+    setFase("app");
+  };
+  if(fase==="pin") return <PantallaPinRepos pin={lic?.pin} onOk={entrarAlApp} />;
 
   const ingBase = ING_DEFAULT_RC;
   const recBase = REC_DEFAULT_RC;
